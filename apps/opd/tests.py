@@ -239,3 +239,26 @@ class OPDCreateDatetimeTests(TestCase):
             format="json",
         )
         self.assertEqual(response.status_code, 400)
+
+    def test_patch_with_visit_datetime_updates_created_at(self):
+        visit = OPDVisit.objects.create(
+            hospital=self.hospital,
+            patient=self.patient,
+            visit_date="2026-05-17",
+            queue_number=1,
+            created_by=self.user,
+            status=OPDVisit.Status.WAITING,
+        )
+        dt = timezone.make_aware(datetime(2026, 5, 17, 9, 45, 0))
+        response = self.client.patch(
+            f"/api/v1/opd-visits/{visit.id}/",
+            {
+                "visit_date": "2026-05-17",
+                "visit_datetime": dt.isoformat(),
+            },
+            format="json",
+        )
+        self.assertEqual(response.status_code, 200)
+        visit.refresh_from_db()
+        self.assertEqual(str(visit.visit_date), "2026-05-17")
+        self.assertEqual(visit.created_at.replace(microsecond=0), dt.replace(microsecond=0))

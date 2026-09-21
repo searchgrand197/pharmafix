@@ -177,7 +177,7 @@ export function StaffPage() {
     const payload = {
       first_name: values.first_name,
       last_name: values.last_name,
-      email: values.email,
+      email: String(values.email || '').trim().toLowerCase(),
       phone: values.phone,
       address: values.address,
       joining_date: values.joining_date || null,

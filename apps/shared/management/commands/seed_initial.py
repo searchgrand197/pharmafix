@@ -47,6 +47,11 @@ PERMISSIONS = {
         "payments.view_transaction": "view",
         "payments.create_transaction": "create",
     },
+    "expenses": {
+        "expenses.view_transaction": "view",
+        "expenses.create_transaction": "create",
+        "expenses.void_transaction": "delete",
+    },
     "staff": {
         "staff.view_department": "view",
         "staff.create_department": "create",

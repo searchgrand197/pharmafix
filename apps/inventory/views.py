@@ -465,7 +465,7 @@ class MedicineBatchViewSet(PharmacyScopedMixin, viewsets.ModelViewSet):
 class StockLedgerViewSet(PharmacyScopedMixin, viewsets.ModelViewSet):
     queryset = StockLedger.objects.all().select_related("medicine", "batch", "pharmacy").order_by("-created_at")
     filter_backends = (DjangoFilterBackend, SearchFilter)
-    filterset_fields = ("batch", "medicine")
+    filterset_fields = ("batch", "medicine", "reason", "reference_type")
     search_fields = ("medicine__name", "batch__batch_no", "reference_type", "reference_id")
 
     permission_classes = [permissions.IsAuthenticated, HasRequiredPermission]

@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react'
-import { X, Loader2 } from 'lucide-react'
+import React, { useCallback, useEffect, useState } from 'react'
+import { X, Loader2, ChevronDown } from 'lucide-react'
 import api from '../api'
 import toast from 'react-hot-toast'
 import { formatWithPattern } from '../utils/dateTimeFormat'
@@ -25,16 +25,27 @@ function qtyLabel(item) {
 
 export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
   const [invoice, setInvoice] = useState(null)
+  const [returnSummary, setReturnSummary] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [expandedSessionKeys, setExpandedSessionKeys] = useState(() => new Set())
 
   useEffect(() => {
     if (!invoiceId) return
     let cancelled = false
     setLoading(true)
-    api.get(`/pharmacy/invoices/${invoiceId}/`)
-      .then(({ data }) => {
+    setReturnSummary(null)
+    setExpandedSessionKeys(new Set())
+
+    Promise.all([
+      api.get(`/pharmacy/invoices/${invoiceId}/`),
+      api.get(`/pharmacy/invoices/${invoiceId}/return-summary/`).catch(() => null),
+    ])
+      .then(([invoiceRes, summaryRes]) => {
         if (cancelled) return
-        setInvoice(data?.data || data || null)
+        setInvoice(invoiceRes.data?.data || invoiceRes.data || null)
+        if (summaryRes) {
+          setReturnSummary(summaryRes.data?.data || summaryRes.data || null)
+        }
       })
       .catch(() => {
         if (!cancelled) toast.error('Failed to load receipt details')
@@ -45,6 +56,15 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
     return () => { cancelled = true }
   }, [invoiceId])
 
+  const toggleSession = useCallback((key) => {
+    setExpandedSessionKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
   if (!invoiceId) return null
 
   const isB2B = Boolean(invoice?.party || invoice?.party_details)
@@ -54,8 +74,11 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
   const items = Array.isArray(invoice?.items) ? invoice.items : []
   const isCancelled = String(invoice?.status || '').toLowerCase() === 'cancelled'
   const totalAmt = Number(invoice?.grand_total || 0)
+  const roundOffAmt = Math.round((Number(invoice?.round_off) || 0) * 100) / 100
   const paidAmt = Number(invoice?.paid_amount || 0)
   const dueAmt = Math.max(0, Number(invoice?.due_amount ?? totalAmt - paidAmt))
+  const hasReturns = Boolean(returnSummary?.has_returns)
+  const returnSessions = Array.isArray(returnSummary?.sessions) ? returnSummary.sessions : []
 
   const customerName = isB2B
     ? (party?.name || invoice?.party_name || invoice?.party_name_snapshot || '—')
@@ -64,7 +87,7 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative z-10 bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
+      <div className="relative z-10 bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between shrink-0 bg-slate-50">
           <div>
             <h3 className="font-bold text-slate-900">Pharmacy Receipt</h3>
@@ -96,7 +119,7 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
                 )}
                 {invoice.created_at && (
                   <span className="text-[10px] text-slate-500 ml-auto">
-                    {formatWithPattern(invoice.created_at, 'dd MMM yyyy, HH:mm')}
+                    {formatWithPattern(invoice.created_at, 'dd/MM/yyyy, HH:mm')}
                   </span>
                 )}
               </div>
@@ -109,13 +132,13 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
                     <p className="text-[10px] text-red-700 mt-1">
                       {invoice.cancelled_by_name ? `By ${invoice.cancelled_by_name}` : ''}
                       {invoice.cancelled_by_name && invoice.cancelled_at ? ' · ' : ''}
-                      {invoice.cancelled_at ? formatWithPattern(invoice.cancelled_at, 'dd MMM yyyy, HH:mm') : ''}
+                      {invoice.cancelled_at ? formatWithPattern(invoice.cancelled_at, 'dd/MM/yyyy, HH:mm') : ''}
                     </p>
                   )}
                 </div>
               )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className={`grid grid-cols-1 gap-3 ${hasReturns ? 'sm:grid-cols-3' : 'sm:grid-cols-2'}`}>
                 <div className="rounded-lg border border-slate-200 p-3">
                   <p className="text-[10px] font-bold text-slate-500 uppercase">Customer</p>
                   <p className="font-semibold text-slate-900 mt-1">{customerName}</p>
@@ -149,6 +172,12 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
                       <span className="text-slate-600">Due</span>
                       <span className="font-semibold text-amber-700">{money(dueAmt)}</span>
                     </div>
+                    {roundOffAmt !== 0 && (
+                      <div className="flex justify-between text-slate-500">
+                        <span>Round off</span>
+                        <span>{roundOffAmt > 0 ? '+' : '−'}{money(Math.abs(roundOffAmt))}</span>
+                      </div>
+                    )}
                     <div className="flex justify-between border-t border-slate-100 pt-1">
                       <span className="font-bold text-slate-800">Grand total</span>
                       <span className="font-bold">{money(totalAmt)}</span>
@@ -167,7 +196,82 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
                     )}
                   </div>
                 </div>
+
+                {hasReturns && returnSummary && (
+                  <div className="rounded-lg border border-slate-200 p-3">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase">Return</p>
+                    <div className="mt-1 space-y-1 text-[11px]">
+                      <div className="flex justify-between">
+                        <span className="text-slate-600">Original</span>
+                        <span className="font-semibold text-slate-800">{money(returnSummary.original_amount)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-rose-600">Returned</span>
+                        <span className="font-semibold text-rose-700">{money(returnSummary.returned_amount)}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-slate-100 pt-1">
+                        <span className="font-bold text-emerald-600">New</span>
+                        <span className="font-bold text-emerald-700">{money(returnSummary.new_amount)}</span>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
+
+              {hasReturns && (
+                <div className="rounded-lg border border-rose-200 bg-rose-50/30 overflow-hidden">
+                  <div className="px-3 py-2 border-b border-rose-100 bg-rose-50">
+                    <p className="text-[10px] font-bold text-rose-800 uppercase tracking-wide">Return History</p>
+                  </div>
+                  <div className="divide-y divide-rose-100">
+                    {returnSessions.map((session) => {
+                      const expanded = expandedSessionKeys.has(session.key)
+                      const dateStr = session.returned_at
+                        ? formatWithPattern(session.returned_at, 'dd/MM/yyyy, HH:mm')
+                        : '—'
+                      const itemCount = session.items?.length || 0
+                      return (
+                        <div key={session.key} className="bg-white/60">
+                          <button
+                            type="button"
+                            onClick={() => toggleSession(session.key)}
+                            className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-rose-50/50 transition-colors"
+                          >
+                            <span className={`shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}>
+                              <ChevronDown size={14} />
+                            </span>
+                            <span className="flex-1 min-w-0 text-[11px] text-slate-700">{dateStr}</span>
+                            <span className="shrink-0 text-[11px] font-semibold text-rose-700">{money(session.refund_amount)}</span>
+                            <span className="shrink-0 text-[9px] text-slate-400">{itemCount} item{itemCount !== 1 ? 's' : ''}</span>
+                          </button>
+                          {expanded && (
+                            <table className="w-full text-left text-[10px] border-t border-rose-100 bg-white/80">
+                              <thead className="text-[9px] font-bold text-slate-500 uppercase">
+                                <tr>
+                                  <th className="px-3 py-1.5 pl-8">Medicine</th>
+                                  <th className="px-3 py-1.5">Batch</th>
+                                  <th className="px-3 py-1.5 text-right">Qty</th>
+                                  <th className="px-3 py-1.5 text-right">Refund</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(session.items || []).map((item, i) => (
+                                  <tr key={`${session.key}-${i}`} className="border-t border-rose-50">
+                                    <td className="px-3 py-1.5 pl-8 font-medium text-slate-800">{item.medicine_name}</td>
+                                    <td className="px-3 py-1.5 text-slate-500 font-mono">{item.batch_no}</td>
+                                    <td className="px-3 py-1.5 text-right text-rose-600 font-semibold">{item.qty_returned}</td>
+                                    <td className="px-3 py-1.5 text-right font-semibold">{money(item.line_refund)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
 
               {(doctor?.user?.first_name || invoice.billing_doctor_name || invoice.billing_hospital_name || invoice.ipd_admission) && (
                 <div className="rounded-lg border border-slate-200 p-3 text-[11px] text-slate-600 space-y-0.5">

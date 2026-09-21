@@ -73,6 +73,7 @@ class OPDVisitSerializer(serializers.ModelSerializer):
             "status",
             "amount",
             "payment_mode",
+            "opd_payment_slip_no",
             "created_by",
             "created_by_name",
             "cancel_reason",

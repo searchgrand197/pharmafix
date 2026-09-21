@@ -18,7 +18,7 @@ import { AppButton } from '@/components/AppButton'
 const ITEMS_PER_PAGE = 10
 
 function formatDateTimeCell(iso) {
-  return formatDateTime(iso, { withSeconds: true })
+  return formatDateTime(iso, {})
 }
 
 function formatAmount(value) {

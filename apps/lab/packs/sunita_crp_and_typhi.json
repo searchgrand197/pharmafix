@@ -1,0 +1,63 @@
+{
+  "format": "curevice.lab_templates",
+  "version": 2,
+  "exported_at": "2026-09-02T00:00:00+00:00",
+  "source_hospital_name": "SUNITA last page — CRP and Typhi",
+  "categories": ["Serology"],
+  "test_count": 1,
+  "tests": [
+    {
+      "name": "CRP and Typhi",
+      "code": "CRP-TYPHI",
+      "unit": "",
+      "reference_range": "",
+      "price": "450.00",
+      "is_group_test": true,
+      "procedure": "",
+      "is_active": true,
+      "sample_type": "SERUM",
+      "method": "Automated Nephelometric immunoassay based assay; Immunochromatography",
+      "interpretation": "CRP is an acute phase reactant which is used in inflammatory disorders for monitoring course and effect of therapy. It is most useful as an indicator of activity in rheumatoid arthritis, Rheumatic fever, tissue injury or necrosis and infections. As compared to ESR, CRP shows an earlier rise in inflammatory disorders which begins in 4-6 hrs, the intensity of the rise being higher than ESR and the recovery being earlier than ESR. Unlike ESR, CRP levels are not influenced by hematologic conditions like Anemia, Polycythemia etc.\n\nRESULTS CLINICAL INTERPRETATION:\nIgM positive; IgG negative — Acute Typhoid Fever\nIgM and IgG positive — Acute Typhoid Fever (in the middle stage of infection)\nIgM negative; IgG positive — Implications for the presence of IgG antibodies may be due to: 1. Current Infection 2. Previous Infection 3. Relapse or reinfection\nIgM and IgG negative — Probably not typhoid",
+      "department_label": "SEROLOGY",
+      "category_name": "Serology",
+      "parameters": [
+        {
+          "name": "C Reactive Protein (CRP)",
+          "code": "CRP",
+          "unit": "mg/L",
+          "reference_range": "< 6.0",
+          "ref_low": "0",
+          "ref_high": "6.0",
+          "method": "Automated Nephelometric immunoassay based assay",
+          "section_title": "Nephelometric (Quantitative)",
+          "sort_order": 1,
+          "result_type": "numeric"
+        },
+        {
+          "name": "TYPHI DOT / SALMONELLA TYPHI IgM",
+          "code": "TYPHI-IGM",
+          "unit": "",
+          "reference_range": "Negative",
+          "ref_low": null,
+          "ref_high": null,
+          "method": "Immunochromatography",
+          "section_title": "SEROLOGY",
+          "sort_order": 2,
+          "result_type": "qualitative"
+        },
+        {
+          "name": "TYPHI DOT / SALMONELLA TYPHI IgG",
+          "code": "TYPHI-IGG",
+          "unit": "",
+          "reference_range": "Negative",
+          "ref_low": null,
+          "ref_high": null,
+          "method": "Immunochromatography",
+          "section_title": "SEROLOGY",
+          "sort_order": 3,
+          "result_type": "qualitative"
+        }
+      ]
+    }
+  ]
+}

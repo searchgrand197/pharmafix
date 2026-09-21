@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   computeBillingTotals,
+  computeInvoiceRoundOff,
   computeMargGstOnBase,
   computeMargPurchaseLineAmounts,
   computePurchaseLineAmounts,
@@ -22,6 +23,20 @@ describe('lineSellingRateDisplay', () => {
   })
   it('returns unit rate when qty is zero', () => {
     expect(lineSellingRateDisplay({ qty: 0, rate: 12 })).toBe(12)
+  })
+})
+
+describe('computeInvoiceRoundOff', () => {
+  it('rounds down and reports the deducted paise', () => {
+    expect(computeInvoiceRoundOff(120.4)).toEqual({ payable: 120, roundOff: -0.4 })
+  })
+  it('rounds up at half a rupee', () => {
+    expect(computeInvoiceRoundOff(120.5)).toEqual({ payable: 121, roundOff: 0.5 })
+    expect(computeInvoiceRoundOff(120.6)).toEqual({ payable: 121, roundOff: 0.4 })
+  })
+  it('leaves whole rupees and zero untouched', () => {
+    expect(computeInvoiceRoundOff(120)).toEqual({ payable: 120, roundOff: 0 })
+    expect(computeInvoiceRoundOff(0)).toEqual({ payable: 0, roundOff: 0 })
   })
 })
 

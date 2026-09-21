@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offer Already Processed</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 600px;
+            padding: 40px;
+            text-align: center;
+        }
+        .icon {
+            font-size: 80px;
+            color: #17a2b8;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #17a2b8;
+            margin-bottom: 10px;
+        }
+        .message {
+            color: #333;
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        .status {
+            background: #e3f2fd;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            font-weight: bold;
+            color: #0d47a1;
+        }
+        .footer {
+            color: #999;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">i</div>
+        <h1>Offer Already Processed</h1>
+        
+        <p class="message">
+            This offer has already been processed.
+        </p>
+        
+        <div class="status">
+            {{ message }}
+        </div>
+        
+        <p class="message">
+            If you have any questions, please contact our HR team at <strong>{{ offer.company_email }}</strong>.
+        </p>
+        
+        <div class="footer">
+            {{ offer.company_name }} | {{ offer.company_email }}
+        </div>
+    </div>
+</body>
+</html>

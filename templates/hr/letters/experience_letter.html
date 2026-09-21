@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Experience Letter — {{ employee_name }}</title>
+<style>
+    @page {
+        size: A4;
+        margin: 40px 48px;
+    }
+
+    body {
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 12px;
+        color: #111111;
+        line-height: 1.6;
+        margin: 0;
+        padding: 0;
+    }
+
+    .header-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin-bottom: 24px;
+    }
+
+    .header-table td {
+        vertical-align: top;
+        padding: 0;
+    }
+
+    .letter-date {
+        text-align: right;
+        font-size: 12px;
+        color: #333333;
+    }
+
+    .company-logo {
+        max-width: 80px;
+        max-height: 40px;
+        margin-bottom: 6px;
+    }
+
+    .company-name {
+        font-size: 18px;
+        font-weight: bold;
+        margin: 0 0 4px 0;
+        color: #000000;
+    }
+
+    .company-address {
+        font-size: 11px;
+        color: #444444;
+        margin: 0;
+        line-height: 1.4;
+    }
+
+    .letter-title {
+        text-align: center;
+        font-size: 16px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin: 24px 0 28px 0;
+        color: #000000;
+    }
+
+    .body-text {
+        font-size: 12px;
+        margin: 0 0 14px 0;
+        text-align: justify;
+    }
+
+    .signature-block {
+        margin-top: 48px;
+    }
+
+    .signature-image {
+        height: 28px;
+        width: auto;
+        display: block;
+        margin-bottom: 6px;
+    }
+
+    .signatory-name {
+        font-weight: bold;
+        margin: 0 0 2px 0;
+    }
+
+    .signatory-designation {
+        margin: 0;
+        color: #333333;
+    }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width: 60%;">
+            {% if logo_url %}
+            <img src="{{ logo_url }}" alt="Logo" class="company-logo"/>
+            {% endif %}
+            <p class="company-name">{{ company_name }}</p>
+            {% if company_address %}
+            <p class="company-address">{{ company_address|linebreaksbr }}</p>
+            {% endif %}
+        </td>
+        <td style="width: 40%;" class="letter-date">
+            Date: {{ letter_date }}
+        </td>
+    </tr>
+</table>
+
+<p class="letter-title">Experience / Relieving Letter</p>
+
+<p class="body-text"><strong>To Whom It May Concern,</strong></p>
+
+<p class="body-text">
+    This is to certify that <strong>{{ employee_name }}</strong> (Employee ID: <strong>{{ employee_id }}</strong>)
+    was employed with <strong>{{ company_name }}</strong> as <strong>{{ designation }}</strong>
+    in the <strong>{{ department }}</strong> department
+    from <strong>{{ joining_date }}</strong> to <strong>{{ relieving_date }}</strong>{% if tenure %},
+    for a period of {{ tenure }}{% endif %}.
+</p>
+
+<p class="body-text">
+    During the tenure with us, {{ employee_name }} was responsible for duties associated with the role of
+    {{ designation }} and discharged responsibilities assigned from time to time.
+</p>
+
+<p class="body-text">
+    We found {{ employee_name }}'s conduct and performance to be {{ conduct_remarks }} during the period of employment.
+</p>
+
+{% if show_exit_reason %}
+<p class="body-text">
+    {{ employee_name }} left the organization due to {{ exit_reason|lower }}.
+</p>
+{% endif %}
+
+<p class="body-text">
+    We wish {{ employee_name }} all the best in future endeavours.
+</p>
+
+<div class="signature-block">
+    <p class="body-text">For {{ company_name }},</p>
+    {% if signature_url %}
+    <img src="{{ signature_url }}" alt="Signature" class="signature-image"
+         style="height: 28px; width: auto; display: block;"/>
+    {% endif %}
+    <p class="signatory-name">{{ hr_name }}</p>
+    <p class="signatory-designation">{{ hr_designation }}</p>
+</div>
+
+</body>
+</html>

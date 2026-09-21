@@ -10,6 +10,7 @@ import {
   resolveSlipFieldLabel,
 } from './opdCoreFields.js';
 import { syncCoreFieldsIntoLayout } from './syncCoreFieldsIntoLayout.js';
+import { DEFAULT_RX_BOX, normalizeRxBox } from '../../pharmacy/rxBoxDefaults.js';
 
 const CANVAS_W = 1024;
 const CANVAS_H = 1451;
@@ -51,6 +52,16 @@ export function mountTemplateEditor(root) {
   const addHLineBtn     = $('add-hline-btn');
   const addVLineBtn     = $('add-vline-btn');
   const addTableBtn     = $('add-table-btn');
+  const addRxBoxBtn     = $('add-rx-box-btn');
+  const rxBoxPropsEl    = $('rx-box-props');
+  const removeRxBoxBtn  = $('remove-rx-box-btn');
+  const rxBoxFontSizeEl = $('rx-box-fontsize');
+  const rxBoxShowRxEl   = $('rx-box-show-rx');
+  const rxBoxShowCcEl   = $('rx-box-show-cc');
+  const rxBoxShowNotesEl = $('rx-box-show-notes');
+  const rxBoxShowFupEl  = $('rx-box-show-fup');
+  const rxBoxShowQtyEl  = $('rx-box-qty');
+  const rxBoxShowTimingEl = $('rx-box-timing');
   const fieldErrorEl    = $('field-error');
   const fieldListEl     = $('field-list');
   const noteListEl      = $('note-list');
@@ -83,6 +94,9 @@ export function mountTemplateEditor(root) {
   let resizeTableStartTotalW    = 0;
   let resizeTableStartTotalH    = 0;
   let resizeTableRows           = 2;
+  let resizeRxBox                 = false;
+  let resizeRxBoxStartW           = 0;
+  let resizeRxBoxStartH           = 0;
 
   // ── Layout model ────────────────────────────────────────────────────────────
   // fields:  { [name]: { x, y, size, width?, height?, bold?, italic?, color? } }
@@ -309,6 +323,7 @@ export function mountTemplateEditor(root) {
           notes:  { ...(single.layout.notes  || {}) },
           shapes: { ...(single.layout.shapes || {}) },
           tables: { ...(single.layout.tables || {}) },
+          rx_box: normalizeRxBox(single.layout.rx_box) || undefined,
           backgroundDataUrl: single.layout.backgroundDataUrl || layout.backgroundDataUrl,
           showFieldLabels: typeof single.layout.showFieldLabels === 'boolean'
             ? single.layout.showFieldLabels : false,
@@ -346,6 +361,7 @@ export function mountTemplateEditor(root) {
         candidate.showFieldLabels === true && candidate.alignSlipFieldColumns === true,
       printOffsetX: typeof candidate.printOffsetX === 'number' ? candidate.printOffsetX : undefined,
       printOffsetY: typeof candidate.printOffsetY === 'number' ? candidate.printOffsetY : undefined,
+      rx_box: normalizeRxBox(candidate.rx_box) || undefined,
     };
   }
 
@@ -460,6 +476,9 @@ export function mountTemplateEditor(root) {
       const cfg = layout.tables[el.dataset.table];
       if (cfg) applyTableStyle(el, cfg);
     });
+    canvasEl.querySelectorAll('.dynamic-rx-box').forEach((el) => {
+      if (layout.rx_box) applyRxBoxStyle(el, layout.rx_box);
+    });
   }
 
   function updateLayoutFromBox(box) {
@@ -508,6 +527,10 @@ export function mountTemplateEditor(root) {
       if (!layout.tables[id]) layout.tables[id] = {};
       layout.tables[id].x = Math.round(xC);
       layout.tables[id].y = Math.round(yC);
+    } else if (box.dataset.rxbox) {
+      if (!layout.rx_box) layout.rx_box = { ...DEFAULT_RX_BOX };
+      layout.rx_box.x = Math.round(xC);
+      layout.rx_box.y = Math.round(yC);
     }
   }
 
@@ -575,6 +598,78 @@ export function mountTemplateEditor(root) {
     return el;
   }
 
+  function applyRxBoxStyle(el, cfg) {
+    const x = cfg.x || 0;
+    const y = cfg.y || 0;
+    const w = cfg.width || DEFAULT_RX_BOX.width;
+    const h = cfg.height || DEFAULT_RX_BOX.height;
+    el.style.left = `${((x / CANVAS_W) * 100).toFixed(4)}%`;
+    el.style.top = `${((y / CANVAS_H) * 100).toFixed(4)}%`;
+    el.style.width = `${((w / CANVAS_W) * 100).toFixed(4)}%`;
+    el.style.height = `${((h / CANVAS_H) * 100).toFixed(4)}%`;
+    el.style.boxSizing = 'border-box';
+    const fs = cfg.fontSize || DEFAULT_RX_BOX.fontSize;
+    el.style.fontSize = toCqw(fs);
+  }
+
+  function createRxBoxElement() {
+    if (!canvasEl || !layout.rx_box) return null;
+    const existing = canvasEl.querySelector('.dynamic-rx-box');
+    if (existing) existing.remove();
+    const cfg = layout.rx_box;
+    const el = document.createElement('div');
+    el.className = 'dynamic-rx-box';
+    el.dataset.rxbox = 'prescription';
+    const inner = document.createElement('div');
+    inner.className = 'dynamic-rx-box-inner';
+    inner.innerHTML = [
+      '<div class="dynamic-rx-box-title">Rx Prescription Area</div>',
+      '<div class="dynamic-rx-box-preview">Chief Complaint · Prescription · Notes · Follow-up</div>',
+      '<div class="dynamic-rx-box-sample">Medicine | Dosage | Days | Qty | Timing</div>',
+    ].join('');
+    el.appendChild(inner);
+    applyRxBoxStyle(el, cfg);
+    const handle = document.createElement('div');
+    handle.className = 'shape-resize-handle';
+    handle.title = 'Drag to resize prescription box';
+    el.appendChild(handle);
+    canvasEl.appendChild(el);
+    return el;
+  }
+
+  function syncRxBoxPropsPanel() {
+    const hasBox = !!layout.rx_box;
+    if (addRxBoxBtn) {
+      addRxBoxBtn.textContent = hasBox ? 'Edit Prescription Box' : '+ Prescription Box';
+    }
+    if (rxBoxPropsEl) rxBoxPropsEl.style.display = hasBox ? 'block' : 'none';
+    if (!hasBox) return;
+    const cfg = layout.rx_box;
+    if (rxBoxFontSizeEl) rxBoxFontSizeEl.value = String(cfg.fontSize ?? DEFAULT_RX_BOX.fontSize);
+    if (rxBoxShowRxEl) rxBoxShowRxEl.checked = cfg.showRx !== false;
+    if (rxBoxShowCcEl) rxBoxShowCcEl.checked = cfg.showChiefComplaint !== false;
+    if (rxBoxShowNotesEl) rxBoxShowNotesEl.checked = cfg.showNotes !== false;
+    if (rxBoxShowFupEl) rxBoxShowFupEl.checked = cfg.showFollowUp !== false;
+    if (rxBoxShowQtyEl) rxBoxShowQtyEl.checked = cfg.showQty !== false;
+    if (rxBoxShowTimingEl) rxBoxShowTimingEl.checked = cfg.showTiming !== false;
+  }
+
+  function addRxBox() {
+    if (!layout.rx_box) {
+      layout.rx_box = { ...DEFAULT_RX_BOX };
+    }
+    createRxBoxElement();
+    syncRxBoxPropsPanel();
+    updateJson();
+  }
+
+  function removeRxBox() {
+    layout.rx_box = undefined;
+    canvasEl?.querySelector('.dynamic-rx-box')?.remove();
+    syncRxBoxPropsPanel();
+    updateJson();
+  }
+
   function getTableInnerEl(tableWrapper) {
     return tableWrapper?.querySelector?.('.dynamic-table-inner') || tableWrapper;
   }
@@ -582,16 +677,18 @@ export function mountTemplateEditor(root) {
   function renderAllFromLayout() {
     if (!canvasEl) return;
     canvasEl.querySelectorAll(
-      '.field-box.dynamic-field, .field-box.dynamic-note, .dynamic-shape, .dynamic-table'
+      '.field-box.dynamic-field, .field-box.dynamic-note, .dynamic-shape, .dynamic-table, .dynamic-rx-box'
     ).forEach((el) => el.remove());
 
     Object.keys(layout.fields || {}).forEach((n)  => createBoxElement(n));
     Object.keys(layout.notes  || {}).forEach((id) => createNoteElement(id));
     Object.keys(layout.shapes || {}).forEach((id) => createShapeElement(id));
     Object.keys(layout.tables || {}).forEach((id) => createTableElement(id));
+    if (layout.rx_box) createRxBoxElement();
 
     positionBoxesFromLayout();
     syncOpdSlipLabelChVar();
+    syncRxBoxPropsPanel();
   }
 
   // ── Error helpers ───────────────────────────────────────────────────────────
@@ -1267,8 +1364,21 @@ export function mountTemplateEditor(root) {
   function onMouseDown(e) {
     if (!(e.target instanceof HTMLElement)) return;
 
-    // Resize handle on shapes
+    // Resize handle on shapes / tables / rx box
     if (e.target.classList.contains('shape-resize-handle')) {
+      const rxEl = e.target.closest('.dynamic-rx-box');
+      if (rxEl && layout.rx_box) {
+        isResizing = true;
+        resizeRxBox = true;
+        resizeShapeId = null;
+        resizeTableId = null;
+        resizeStartCX = e.clientX;
+        resizeStartCY = e.clientY;
+        resizeRxBoxStartW = layout.rx_box.width || DEFAULT_RX_BOX.width;
+        resizeRxBoxStartH = layout.rx_box.height || DEFAULT_RX_BOX.height;
+        e.preventDefault();
+        return;
+      }
       const tableEl = e.target.closest('.dynamic-table');
       if (tableEl && layout.tables?.[tableEl.dataset.table]) {
         isResizing = true;
@@ -1305,7 +1415,7 @@ export function mountTemplateEditor(root) {
     }
 
     const box = e.target.closest(
-      '.field-box.dynamic-field, .field-box.dynamic-note, .dynamic-shape, .dynamic-table'
+      '.field-box.dynamic-field, .field-box.dynamic-note, .dynamic-shape, .dynamic-table, .dynamic-rx-box'
     );
     if (!box) return;
     isDragging  = true;
@@ -1317,6 +1427,27 @@ export function mountTemplateEditor(root) {
   }
 
   function onMouseMove(e) {
+    // Resize prescription box
+    if (isResizing && resizeRxBox && layout.rx_box && canvasEl) {
+      const m = getCanvasContentMetrics();
+      if (!m || m.innerW <= 0 || m.innerH <= 0) return;
+      const scaleX = CANVAS_W / m.innerW;
+      const scaleY = CANVAS_H / m.innerH;
+      const dx = (e.clientX - resizeStartCX) * scaleX;
+      const dy = (e.clientY - resizeStartCY) * scaleY;
+      const x0 = typeof layout.rx_box.x === 'number' ? layout.rx_box.x : 0;
+      const y0 = typeof layout.rx_box.y === 'number' ? layout.rx_box.y : 0;
+      let newW = Math.max(120, Math.round(resizeRxBoxStartW + dx));
+      let newH = Math.max(80, Math.round(resizeRxBoxStartH + dy));
+      newW = Math.min(newW, Math.max(120, CANVAS_W - x0));
+      newH = Math.min(newH, Math.max(80, CANVAS_H - y0));
+      layout.rx_box.width = newW;
+      layout.rx_box.height = newH;
+      const el = canvasEl.querySelector('.dynamic-rx-box');
+      if (el) applyRxBoxStyle(el, layout.rx_box);
+      return;
+    }
+
     // Resize table (width + height, column ratios preserved)
     if (isResizing && resizeTableId && canvasEl) {
       const m = getCanvasContentMetrics();
@@ -1396,6 +1527,7 @@ export function mountTemplateEditor(root) {
       isResizing = false;
       resizeShapeId = null;
       resizeTableId = null;
+      resizeRxBox = false;
       // Sync sidebar length/size inputs after resize
       renderShapeList();
       updateJson();
@@ -1475,6 +1607,35 @@ export function mountTemplateEditor(root) {
   if (addHLineBtn) on(addHLineBtn, 'click', (e) => { e.preventDefault(); addLine('horizontal'); });
   if (addVLineBtn) on(addVLineBtn, 'click', (e) => { e.preventDefault(); addLine('vertical'); });
   if (addTableBtn) on(addTableBtn, 'click', (e) => { e.preventDefault(); addTable(); });
+  if (addRxBoxBtn) on(addRxBoxBtn, 'click', (e) => { e.preventDefault(); addRxBox(); });
+  if (removeRxBoxBtn) on(removeRxBoxBtn, 'click', (e) => { e.preventDefault(); removeRxBox(); });
+
+  const bindRxBoxCheckbox = (el, key) => {
+    if (!el) return;
+    on(el, 'change', () => {
+      if (!layout.rx_box) layout.rx_box = { ...DEFAULT_RX_BOX };
+      layout.rx_box[key] = el.checked;
+      updateJson();
+    });
+  };
+  bindRxBoxCheckbox(rxBoxShowRxEl, 'showRx');
+  bindRxBoxCheckbox(rxBoxShowCcEl, 'showChiefComplaint');
+  bindRxBoxCheckbox(rxBoxShowNotesEl, 'showNotes');
+  bindRxBoxCheckbox(rxBoxShowFupEl, 'showFollowUp');
+  bindRxBoxCheckbox(rxBoxShowQtyEl, 'showQty');
+  bindRxBoxCheckbox(rxBoxShowTimingEl, 'showTiming');
+
+  if (rxBoxFontSizeEl) {
+    on(rxBoxFontSizeEl, 'input', () => {
+      const v = Number(rxBoxFontSizeEl.value);
+      if (!Number.isFinite(v) || v < 7 || v > 16) return;
+      if (!layout.rx_box) layout.rx_box = { ...DEFAULT_RX_BOX };
+      layout.rx_box.fontSize = v;
+      const el = canvasEl?.querySelector('.dynamic-rx-box');
+      if (el) applyRxBoxStyle(el, layout.rx_box);
+      updateJson();
+    });
+  }
 
   if (newFieldInput) {
     on(newFieldInput, 'keydown', (e) => {
@@ -1529,6 +1690,7 @@ export function mountTemplateEditor(root) {
     await loadFromBackend();
     await loadOpdFieldConfig();
     layout = syncCoreFieldsIntoLayout(layout, opdFieldConfig);
+    if (!layout.rx_box) layout.rx_box = { ...DEFAULT_RX_BOX };
     if (!layout.showFieldLabels) layout.alignSlipFieldColumns = false;
     syncBackgroundImage();
     if (showLabelsToggle) showLabelsToggle.checked = layout.showFieldLabels === true;

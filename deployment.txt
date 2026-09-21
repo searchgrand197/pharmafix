@@ -62,9 +62,15 @@ echo "---- DEPLOY START $(date) ----" >> $LOG
 
 cd $APP_DIR || exit 1
 
-echo "Fetching code..." >> $LOG
+echo "Fetching code (ff-only; NEVER reset --hard over a live DB)..." >> $LOG
+# Backup SQLite first if present
+BACKUP_DIR="$APP_DIR/backups/db-$(date +%Y%m%d-%H%M%S)"
+mkdir -p "$BACKUP_DIR"
+cp -a db.sqlite3* "$BACKUP_DIR/" 2>/dev/null || true
+
 git fetch origin >> $LOG 2>&1
-git reset --hard origin/$BRANCH >> $LOG 2>&1
+git pull --ff-only origin $BRANCH >> $LOG 2>&1
+# Do NOT: git reset --hard origin/$BRANCH  (can overwrite client db.sqlite3)
 
 echo "Activating virtualenv..." >> $LOG
 source $VENV/bin/activate
@@ -172,16 +178,18 @@ Shelltail -f /var/log/django-deploy.logShow more lines
 
 Deploy only from main
 Use .env for secrets
-Use reset --hard in prod
+Backup db.sqlite3* before pull, then git pull --ff-only
 Use Gunicorn restart
 Lock webhook with token + IP
+Prefer POSTGRES_DB (or SQLITE_PATH outside the git tree) on production
 
 ❌ DON’T
 
 Push code from VPS
-Commit .env
+Commit .env or db.sqlite3*
 Deploy feature branches
-Use git pull blindly
+Use git reset --hard on a live DB checkout
+Overwrite client databases on update
 ------------------------------------------------------
 ✅ Recommended Django Flow
 feature/* → PR → main → auto deploy → production

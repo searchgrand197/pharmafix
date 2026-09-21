@@ -43,6 +43,10 @@ function fmtMoney(n) {
   return v.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
+function isActiveExpense(e) {
+  return !e?.voided && e?.status !== 'cancelled'
+}
+
 function paymentEncounterLabel(p) {
   const invNo = String(p?.invoice_no || p?.invoice_details?.invoice_no || '')
   if (invNo.startsWith('IPDADV-')) return 'IPD Advance'
@@ -60,6 +64,32 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function getSlipItemNames(payment) {
+  const items = payment?.invoice_details?.items
+  if (Array.isArray(items) && items.length > 0) {
+    return items
+      .map((item) => String(item?.description || '').trim())
+      .filter(Boolean)
+      .join(', ') || '—'
+  }
+  return String(
+    payment?.description
+    || payment?.invoice_details?.description
+    || '—',
+  ).trim() || '—'
+}
+
+function getExpenseItemNames(expense) {
+  const items = expense?.items
+  if (Array.isArray(items) && items.length > 0) {
+    return items
+      .map((item) => String(item?.description || '').trim())
+      .filter(Boolean)
+      .join(', ') || '—'
+  }
+  return String(expense?.remarks || '').trim() || '—'
 }
 
 function renderPaymentSlipsByCategoryHtml(categories) {
@@ -242,10 +272,12 @@ export default function ReportsSection() {
   const [departments, setDepartments] = useState([])
   const [staff, setStaff] = useState([])
   const [collectionSummary, setCollectionSummary] = useState(null)
+  const [expenses, setExpenses] = useState([])
   const [slipCategories, setSlipCategories] = useState([])
   const [quickServices, setQuickServices] = useState([])
   const [slipCategory, setSlipCategory] = useState('')
   const [slipPrintView, setSlipPrintView] = useState('category')
+  const [showSlipItemNames, setShowSlipItemNames] = useState(false)
   const [printingDoctorRevenue, setPrintingDoctorRevenue] = useState(false)
   const [printPreview, setPrintPreview] = useState(null)
 
@@ -293,6 +325,7 @@ export default function ReportsSection() {
       const wantsSlips = isAll || effectiveTypes.includes('payment_slips')
       const wantsIpd = isAll || effectiveTypes.includes('ipd_advance')
       const wantsRefunds = isAll || effectiveTypes.includes('refunds')
+      const wantsExpenses = isAll || effectiveTypes.includes('expenses')
 
       const opdParams = new URLSearchParams({
         limit: '2000',
@@ -316,10 +349,20 @@ export default function ReportsSection() {
       const summaryParams = new URLSearchParams({ date_from: fromDate, date_to: toDate })
       if (doctorUser) summaryParams.set('attributed_doctor_user', doctorUser)
 
-      const [opdRes, payRes, summaryRes] = await Promise.all([
-        api.get(`/opd-visits/?${opdParams}`),
-        api.get(`/payments/?${payParams}`),
+      const expenseParams = new URLSearchParams({
+        limit: '2000',
+        ordering: '-paid_at',
+        paid_at__date__gte: fromDate,
+        paid_at__date__lte: toDate,
+        voided: 'false',
+        status: 'success',
+      })
+
+      const [opdRes, payRes, summaryRes, expenseRes] = await Promise.all([
+        wantsOpd || isAll ? api.get(`/opd-visits/?${opdParams}`) : Promise.resolve({ data: { data: [] } }),
+        wantsSlips || wantsIpd || wantsRefunds || isAll ? api.get(`/payments/?${payParams}`) : Promise.resolve({ data: { data: [] } }),
         api.get(`/reports/collection-summary/?${summaryParams}`),
+        wantsExpenses || isAll ? api.get(`/expenses/?${expenseParams}`) : Promise.resolve({ data: { data: [] } }),
       ])
       let opdRows = extractApiRows(opdRes.data).filter((v) => v.status !== 'cancelled')
       let payRows = extractApiRows(payRes.data)
@@ -352,6 +395,11 @@ export default function ReportsSection() {
 
       setOpdVisits(opdRows)
       setPayments(payRows)
+      setExpenses(
+        wantsExpenses || isAll
+          ? extractApiRows(expenseRes.data).filter(isActiveExpense)
+          : [],
+      )
       setCollectionSummary(summaryRes.data?.data || summaryRes.data || null)
       setLastFetched(new Date())
     } catch {
@@ -393,6 +441,7 @@ export default function ReportsSection() {
       { id: 'opd', label: 'OPD', type: 'opd' },
       { id: 'slips', label: 'Slips', type: 'payment_slips' },
       { id: 'refunds', label: 'Refunds', type: 'refunds' },
+      { id: 'expenses', label: 'Expenses', type: 'expenses' },
       { id: 'ipd', label: 'IPD adv.', type: 'ipd_advance' },
     ].filter((t) => isAll || !t.type || effectiveTypes.includes(t.type))
   }, [effectiveTypes])
@@ -541,7 +590,7 @@ export default function ReportsSection() {
       header = ['S.No', 'Date', 'Patient', 'UHID', 'Doctor', 'Department', 'Amount', 'Mode', 'OPD No']
       rows = opdVisits.map((v, i) => [
         i + 1,
-        v.visit_date ? format(new Date(v.visit_date), 'd/M/yyyy') : '',
+        v.visit_date ? format(new Date(v.visit_date), 'dd/MM/yyyy') : '',
         v.patient_name || '',
         v.patient_uhid || '',
         v.doctor_name || '',
@@ -561,6 +610,25 @@ export default function ReportsSection() {
         p.payment_mode || '',
         p.amount ?? '',
       ])
+    } else if (dataTab === 'expenses') {
+      header = showSlipItemNames
+        ? ['S.No', 'Date', 'Voucher #', 'Paid to', 'Items', 'Mode', 'Amount', 'Recorded by']
+        : ['S.No', 'Date', 'Voucher #', 'Paid to', 'Mode', 'Amount', 'Recorded by']
+      rows = expenses.map((e, i) => {
+        const base = [
+          i + 1,
+          e.paid_at ? formatDateTime(e.paid_at) : '',
+          e.slip_number || '',
+          e.paid_to || '',
+        ]
+        if (showSlipItemNames) base.push(getExpenseItemNames(e))
+        base.push(
+          e.payment_mode || '',
+          e.total_amount ?? '',
+          e.recorded_by_name || '',
+        )
+        return base
+      })
     } else if (dataTab === 'refunds') {
       header = ['S.No', 'Date', 'Slip No', 'Patient', 'Invoice', 'Mode', 'Refunded']
       rows = refundPayments.map((p, i) => [
@@ -573,18 +641,26 @@ export default function ReportsSection() {
         refundPaymentAmount(p),
       ])
     } else {
-      header = ['S.No', 'Date', 'Slip No', 'Patient', 'Type', 'Mode', 'Amount', 'Status', 'Invoice']
-      rows = paymentSlipsOnly.map((p, i) => [
-        i + 1,
-        p.paid_at ? formatDateTime(p.paid_at) : '',
-        p.slip_number || '',
-        p.patient_name || '',
-        paymentEncounterLabel(p),
-        p.payment_mode || '',
-        p.amount ?? '',
-        p.status || '',
-        p.invoice_no || '',
-      ])
+      header = showSlipItemNames
+        ? ['S.No', 'Date', 'Slip No', 'Patient', 'Items', 'Type', 'Mode', 'Amount', 'Status', 'Invoice']
+        : ['S.No', 'Date', 'Slip No', 'Patient', 'Type', 'Mode', 'Amount', 'Status', 'Invoice']
+      rows = paymentSlipsOnly.map((p, i) => {
+        const base = [
+          i + 1,
+          p.paid_at ? formatDateTime(p.paid_at) : '',
+          p.slip_number || '',
+          p.patient_name || '',
+        ]
+        if (showSlipItemNames) base.push(getSlipItemNames(p))
+        base.push(
+          paymentEncounterLabel(p),
+          p.payment_mode || '',
+          p.amount ?? '',
+          p.status || '',
+          p.invoice_no || '',
+        )
+        return base
+      })
     }
     const csv = [header, ...rows].map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
@@ -608,7 +684,7 @@ export default function ReportsSection() {
     const printedAt = formatWithPattern(new Date(), 'd MMMM yyyy · HH:mm')
     const periodLabel = `${format(new Date(`${fromDate}T12:00:00`), 'd MMM yyyy')} – ${format(new Date(`${toDate}T12:00:00`), 'd MMM yyyy')}`
 
-    const typeLabels = { all: 'All collections', opd: 'OPD slips', ipd_advance: 'IPD advances', payment_slips: 'Payment slips', refunds: 'Refunds' }
+    const typeLabels = { all: 'All collections', opd: 'OPD slips', ipd_advance: 'IPD advances', payment_slips: 'Payment slips', refunds: 'Refunds', expenses: 'Expenses' }
     const scopeLabel = effectiveTypes.includes('all')
       ? 'All collections'
       : effectiveTypes.map((t) => typeLabels[t] || t).join(' + ')
@@ -634,7 +710,7 @@ export default function ReportsSection() {
       ? opdVisits.map((v, i) => `
         <tr>
           <td class="c">${i + 1}</td>
-          <td>${escapeHtml(v.visit_date ? format(new Date(v.visit_date), 'd/M/yyyy') : '—')}</td>
+          <td>${escapeHtml(v.visit_date ? format(new Date(v.visit_date), 'dd/MM/yyyy') : '—')}</td>
           <td>${escapeHtml(v.patient_name || '—')}</td>
           <td>${escapeHtml(v.patient_uhid || '—')}</td>
           <td>${escapeHtml(v.opd_no || '—')}</td>
@@ -645,6 +721,7 @@ export default function ReportsSection() {
         </tr>`).join('')
       : '<tr><td colspan="9" class="empty">No OPD visits in this period</td></tr>'
 
+    const slipColCount = showSlipItemNames ? 10 : 9
     const allPayRowsHtml = paymentSlipsOnly.length
       ? paymentSlipsOnly.map((p, i) => `
         <tr>
@@ -653,12 +730,13 @@ export default function ReportsSection() {
           <td>${escapeHtml(p.slip_number || '—')}</td>
           <td>${escapeHtml(p.patient_name || '—')}</td>
           <td>${escapeHtml(p.patient_uhid || '—')}</td>
+          ${showSlipItemNames ? `<td>${escapeHtml(getSlipItemNames(p))}</td>` : ''}
           <td>${escapeHtml(p.attributed_doctor_name || 'Self (Hospital)')}</td>
           <td>${escapeHtml(paymentEncounterLabel(p))}</td>
           <td class="c">${escapeHtml((p.payment_mode || '—').toUpperCase())}</td>
           <td class="r">₹${fmtMoney(p.amount)}</td>
         </tr>`).join('')
-      : '<tr><td colspan="9" class="empty">No payment slips in this period</td></tr>'
+      : `<tr><td colspan="${slipColCount}" class="empty">No payment slips in this period</td></tr>`
 
     const ipdAdvRowsHtml = ipdAdvancePayments.length
       ? ipdAdvancePayments.map((p, i) => `
@@ -693,6 +771,26 @@ export default function ReportsSection() {
     const printWantsSlips = isAllPrint || effectiveTypes.includes('payment_slips')
     const printWantsRefunds = isAllPrint || effectiveTypes.includes('refunds')
     const printWantsIpd = isAllPrint || effectiveTypes.includes('ipd_advance')
+    const printWantsExpenses = isAllPrint || effectiveTypes.includes('expenses')
+    const printWantsCollections = printWantsOpd || printWantsSlips || printWantsRefunds || printWantsIpd
+
+    const expColCount = showSlipItemNames ? 9 : 8
+    const expenseRowsHtml = expenses.length
+      ? expenses.map((e, i) => `
+        <tr>
+          <td class="c">${i + 1}</td>
+          <td>${escapeHtml(e.paid_at ? formatDateTime(e.paid_at) : '—')}</td>
+          <td>${escapeHtml(e.slip_number || '—')}</td>
+          <td>${escapeHtml(e.paid_to || '—')}</td>
+          ${showSlipItemNames ? `<td>${escapeHtml(getExpenseItemNames(e))}</td>` : ''}
+          <td class="c">${escapeHtml((e.payment_mode || '—').toUpperCase())}</td>
+          <td class="c">${e.source === 'other_funds' ? 'Other Funds' : 'Collection'}</td>
+          <td class="r">₹${fmtMoney(e.total_amount)}</td>
+          <td>${escapeHtml(e.recorded_by_name || '—')}</td>
+        </tr>`).join('')
+      : `<tr><td colspan="${expColCount}" class="empty">No expenses in this period</td></tr>`
+    const collectionExpenses = expenses.filter((e) => !e.source || e.source === 'collection')
+    const expensesTotal = collectionExpenses.reduce((s, e) => s + (parseFloat(e.total_amount) || 0), 0)
 
     const tablesBodyHtml = [
       printWantsOpd ? `
@@ -714,11 +812,12 @@ export default function ReportsSection() {
         <thead>
           <tr>
             <th class="c">#</th><th>Date &amp; time</th><th>Slip no</th><th>Patient</th><th>UHID</th>
+            ${showSlipItemNames ? '<th>Items</th>' : ''}
             <th>Doctor</th><th>Type</th><th class="c">Mode</th><th class="r">Amount</th>
           </tr>
         </thead>
         <tbody>${allPayRowsHtml}</tbody>
-        <tfoot><tr><td colspan="8" class="r">Total</td><td class="r">₹${fmtMoney(summary.slipTotalExAdv)}</td></tr></tfoot>
+        <tfoot><tr><td colspan="${slipColCount - 1}" class="r">Total</td><td class="r">₹${fmtMoney(summary.slipTotalExAdv)}</td></tr></tfoot>
       </table>
       ${slipsDetailHtml}` : '',
 
@@ -746,6 +845,20 @@ export default function ReportsSection() {
         </thead>
         <tbody>${ipdAdvRowsHtml}</tbody>
         <tfoot><tr><td colspan="6" class="r">Total</td><td class="r">₹${fmtMoney(summary.advanceTotal)}</td></tr></tfoot>
+      </table>` : '',
+
+      printWantsExpenses ? `
+      <h2 class="sec">Expenses (${expenses.length})</h2>
+      <table class="tbl">
+        <thead>
+          <tr>
+            <th class="c">#</th><th>Date &amp; time</th><th>Voucher #</th><th>Paid to</th>
+            ${showSlipItemNames ? '<th>Items</th>' : ''}
+            <th class="c">Mode</th><th class="c">Source</th><th class="r">Amount</th><th>Recorded by</th>
+          </tr>
+        </thead>
+        <tbody>${expenseRowsHtml}</tbody>
+        <tfoot><tr><td colspan="${expColCount - 2}" class="r">Total (Collection source only)</td><td class="r">₹${fmtMoney(expensesTotal)}</td><td></td></tr></tfoot>
       </table>` : '',
     ].join('')
 
@@ -803,10 +916,11 @@ export default function ReportsSection() {
         <tr><td class="lbl">Scope</td><td>${escapeHtml(scopeLabel)}</td><td class="lbl">Department</td><td>${escapeHtml(deptLabelText)}</td></tr>
         <tr><td class="lbl">Doctor</td><td>${escapeHtml(doctorLabelText)}</td><td class="lbl">Collected by</td><td>${escapeHtml(collectorText)}</td></tr>
         <tr><td class="lbl">Slip detail view</td><td>${escapeHtml(slipDetailViewLabel)}</td><td class="lbl">Slip category</td><td>${escapeHtml(categoryLabelText)}</td></tr>
-        <tr><td class="lbl">OPD visits</td><td>${summary.opdCount} (₹${fmtMoney(summary.opdRevenue)})</td><td class="lbl">Payment slips</td><td>${summary.slipCountExAdv} (₹${fmtMoney(summary.slipTotalExAdv)})</td></tr>
-        <tr><td class="lbl">IPD advances</td><td>${summary.advanceCount} (₹${fmtMoney(summary.advanceTotal)})</td><td class="lbl">Refunds</td><td>${summary.refundCount} (₹${fmtMoney(summary.refundTotal)})</td></tr>
-        <tr><td class="lbl">Grand total</td><td colspan="3">₹${fmtMoney(summary.grandCollection)}</td></tr>
-        <tr><td class="lbl" colspan="2">By mode (OPD + IPD advances + payment slips)</td><td colspan="2">Cash ₹${fmtMoney(summary.modeTotals.cash)} · UPI ₹${fmtMoney(summary.modeTotals.upi)} · Card ₹${fmtMoney(summary.modeTotals.card)} · Other ₹${fmtMoney(summary.modeTotals.other)}</td></tr>
+        ${(printWantsOpd || printWantsSlips) ? `<tr>${printWantsOpd ? `<td class="lbl">OPD visits</td><td>${summary.opdCount} (₹${fmtMoney(summary.opdRevenue)})</td>` : `<td class="lbl"></td><td></td>`}${printWantsSlips ? `<td class="lbl">Payment slips</td><td>${summary.slipCountExAdv} (₹${fmtMoney(summary.slipTotalExAdv)})</td>` : `<td class="lbl"></td><td></td>`}</tr>` : ''}
+        ${(printWantsIpd || printWantsRefunds) ? `<tr>${printWantsIpd ? `<td class="lbl">IPD advances</td><td>${summary.advanceCount} (₹${fmtMoney(summary.advanceTotal)})</td>` : `<td class="lbl"></td><td></td>`}${printWantsRefunds ? `<td class="lbl">Refunds</td><td>${summary.refundCount} (₹${fmtMoney(summary.refundTotal)})</td>` : `<td class="lbl"></td><td></td>`}</tr>` : ''}
+        ${printWantsCollections ? `<tr><td class="lbl">Gross collection</td><td colspan="3">₹${fmtMoney(summary.grandCollection)}</td></tr>` : ''}
+        ${printWantsExpenses ? `<tr><td class="lbl">Expenses</td><td>${expenses.length} voucher(s) · ₹${fmtMoney(expensesTotal)}</td>${printWantsCollections ? `<td class="lbl" style="background:#fee2e2">Net collection</td><td style="font-weight:bold">${(() => { const net = collectionSummary?.net_total != null ? Number(collectionSummary.net_total) : (summary.grandCollection - expensesTotal); return (net < 0 ? '<span style="color:red">−₹' + fmtMoney(Math.abs(net)) + '</span>' : '₹' + fmtMoney(net)); })()}</td>` : `<td class="lbl">Total expenses</td><td style="font-weight:bold">₹${fmtMoney(expensesTotal)}</td>`}</tr>` : ''}
+        ${printWantsCollections ? `<tr><td class="lbl" colspan="2">By mode (OPD + IPD advances + payment slips)</td><td colspan="2">Cash ₹${fmtMoney(summary.modeTotals.cash)} · UPI ₹${fmtMoney(summary.modeTotals.upi)} · Card ₹${fmtMoney(summary.modeTotals.card)} · Other ₹${fmtMoney(summary.modeTotals.other)}</td></tr>` : ''}
       </table>
 
       ${tablesBodyHtml}
@@ -879,7 +993,7 @@ export default function ReportsSection() {
     if (showDailyBreakdown) {
       const dailyRows = (section.daily || []).map((d) => `
       <tr>
-        <td>${escapeHtml(d.date ? format(new Date(`${d.date}T12:00:00`), 'd/M/yyyy') : '—')}</td>
+        <td>${escapeHtml(d.date ? format(new Date(`${d.date}T12:00:00`), 'dd/MM/yyyy') : '—')}</td>
         <td class="r">₹${fmtMoney(d.opd_total)}</td>
         <td class="r">₹${fmtMoney(d.ipd_total)}</td>
         <td class="r">₹${fmtMoney(d.slips_total)}</td>
@@ -1118,6 +1232,7 @@ export default function ReportsSection() {
                     payment_slips: 'Slips',
                     ipd_advance: 'IPD adv.',
                     refunds: 'Refunds',
+                    expenses: 'Expenses',
                   }[t] || t)).join(', ')}
             </span>
             <svg className="w-3 h-3 text-gray-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
@@ -1133,6 +1248,7 @@ export default function ReportsSection() {
                 { id: 'payment_slips', label: 'Payment slips' },
                 { id: 'ipd_advance', label: 'IPD advance' },
                 { id: 'refunds', label: 'Refunds' },
+                { id: 'expenses', label: 'Expenses' },
               ].map((opt) => {
                 const isAll = opt.id === 'all'
                 const checked = isAll
@@ -1186,15 +1302,28 @@ export default function ReportsSection() {
           <option value="category">By category</option>
           <option value="items">By slip items</option>
         </select>
+        <button
+          type="button"
+          onClick={() => setShowSlipItemNames((v) => !v)}
+          title="Toggle item names column in payment slips table"
+          className={`text-[11px] font-semibold px-2 py-0.5 rounded border ${
+            showSlipItemNames
+              ? 'bg-indigo-600 text-white border-indigo-600'
+              : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300 hover:text-indigo-700'
+          }`}
+        >
+          {showSlipItemNames ? '✓ Item names' : 'Item names'}
+        </button>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-1.5">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-1.5">
         {[
           { label: 'OPD', value: summary.opdCount, sub: `₹${fmtMoney(summary.opdRevenue)}`, color: 'border-blue-200/80 bg-blue-50/60' },
           { label: 'Slips', value: summary.slipCountExAdv, sub: `₹${fmtMoney(summary.slipTotalExAdv)}`, color: 'border-emerald-200/80 bg-emerald-50/60' },
           { label: 'IPD adv.', value: summary.advanceCount, sub: `₹${fmtMoney(summary.advanceTotal)}`, color: 'border-amber-200/80 bg-amber-50/60' },
           { label: 'Refunds', value: summary.refundCount, sub: `₹${fmtMoney(summary.refundTotal)}`, color: 'border-sky-200/80 bg-sky-50/60' },
-          { label: 'Grand', value: `₹${fmtMoney(summary.grandCollection)}`, sub: 'All combined', color: 'border-indigo-200/80 bg-indigo-50/60' },
+          (() => { const cExp = expenses.filter((e) => !e.source || e.source === 'collection'); const cTotal = collectionSummary?.expenses_total != null ? Number(collectionSummary.expenses_total) : cExp.reduce((s, e) => s + (parseFloat(e.total_amount) || 0), 0); const othTotal = expenses.filter((e) => e.source === 'other_funds').reduce((s, e) => s + (parseFloat(e.total_amount) || 0), 0); return { label: 'Expenses', value: expenses.length, sub: `₹${fmtMoney(cTotal)} from collection${othTotal > 0 ? ` · ₹${fmtMoney(othTotal)} other` : ''}`, color: 'border-rose-200/80 bg-rose-50/60' } })(),
+          (() => { const net = collectionSummary?.net_total != null ? Number(collectionSummary.net_total) : summary.grandCollection; return { label: 'Net', value: (net < 0 ? '−₹' : '₹') + fmtMoney(Math.abs(net)), sub: 'After expenses', color: net < 0 ? 'border-rose-300/80 bg-rose-100/60' : 'border-indigo-200/80 bg-indigo-50/60' } })()
         ].map((c) => (
           <div key={c.label} className={`rounded-lg border px-2.5 py-1.5 ${c.color}`}>
             <p className="text-[9px] font-semibold uppercase text-gray-500 leading-none">{c.label}</p>
@@ -1226,6 +1355,7 @@ export default function ReportsSection() {
                 : t.id === 'opd' ? opdVisits.length
                 : t.id === 'slips' ? paymentSlipsOnly.length
                 : t.id === 'refunds' ? refundPayments.length
+                : t.id === 'expenses' ? expenses.length
                 : ipdAdvancePayments.length
               return (
                 <button
@@ -1300,9 +1430,21 @@ export default function ReportsSection() {
               {collectionSummary && (
                 <tfoot className="bg-gray-50 border-t border-gray-200">
                   <tr>
-                    <td className="px-3 py-2 font-bold text-right" colSpan={3}>Grand total</td>
+                    <td className="px-3 py-2 font-bold text-right" colSpan={3}>Gross collection</td>
                     <td className="px-3 py-2 text-right font-black tabular-nums">₹{fmtMoney(collectionSummary.grand_total)}</td>
                   </tr>
+                  {collectionSummary.expenses_total != null && (
+                    <tr>
+                      <td className="px-3 py-2 font-bold text-right text-rose-700" colSpan={3}>Less: Expenses</td>
+                      <td className="px-3 py-2 text-right font-bold text-rose-700 tabular-nums">₹{fmtMoney(collectionSummary.expenses_total)}</td>
+                    </tr>
+                  )}
+                  {collectionSummary.net_total != null && (
+                    <tr>
+                      <td className="px-3 py-2 font-bold text-right text-emerald-800" colSpan={3}>Net collection</td>
+                      <td className="px-3 py-2 text-right font-black text-emerald-800 tabular-nums">₹{fmtMoney(collectionSummary.net_total)}</td>
+                    </tr>
+                  )}
                 </tfoot>
               )}
             </table>
@@ -1327,7 +1469,7 @@ export default function ReportsSection() {
                 ) : opdVisits.map((v, i) => (
                   <tr key={v.id} className="hover:bg-blue-50/40">
                     <td className="px-3 py-2 text-gray-500">{i + 1}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{v.visit_date ? format(new Date(v.visit_date), 'd/M/yyyy') : '—'}</td>
+                    <td className="px-3 py-2 whitespace-nowrap">{v.visit_date ? format(new Date(v.visit_date), 'dd/MM/yyyy') : '—'}</td>
                     <td className="px-3 py-2 font-medium">{v.patient_name || '—'}</td>
                     <td className="px-3 py-2 font-mono text-xs">{v.patient_uhid || '—'}</td>
                     <td className="px-3 py-2">{v.doctor_name || '—'}</td>
@@ -1347,6 +1489,7 @@ export default function ReportsSection() {
                   <th className="px-3 py-2 text-left">Date</th>
                   <th className="px-3 py-2 text-left">Slip no</th>
                   <th className="px-3 py-2 text-left">Patient</th>
+                  {showSlipItemNames && <th className="px-3 py-2 text-left">Items</th>}
                   <th className="px-3 py-2 text-left">Attributed to</th>
                   <th className="px-3 py-2 text-left">Type</th>
                   <th className="px-3 py-2 text-left">Mode</th>
@@ -1356,13 +1499,18 @@ export default function ReportsSection() {
               </thead>
               <tbody className="divide-y divide-gray-50">
                 {paymentSlipsOnly.length === 0 ? (
-                  <tr><td colSpan={9} className="px-3 py-6 text-center text-gray-400">No payment slips in this range</td></tr>
+                  <tr><td colSpan={showSlipItemNames ? 10 : 9} className="px-3 py-6 text-center text-gray-400">No payment slips in this range</td></tr>
                 ) : paymentSlipsOnly.map((p, i) => (
                   <tr key={p.id} className="hover:bg-emerald-50/40">
                     <td className="px-3 py-2 text-gray-500">{i + 1}</td>
                     <td className="px-3 py-2 whitespace-nowrap tabular-nums">{p.paid_at ? formatDateTime(p.paid_at) : '—'}</td>
                     <td className="px-3 py-2 font-mono text-xs font-semibold">{p.slip_number || '—'}</td>
                     <td className="px-3 py-2 font-medium">{p.patient_name || '—'}</td>
+                    {showSlipItemNames && (
+                      <td className="px-3 py-2 text-xs text-gray-700 max-w-[220px]">
+                        {getSlipItemNames(p)}
+                      </td>
+                    )}
                     <td className="px-3 py-2 text-xs font-semibold text-indigo-700">{p.attributed_doctor_name || 'Self (Hospital)'}</td>
                     <td className="px-3 py-2"><span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-gray-100">{paymentEncounterLabel(p)}</span></td>
                     <td className="px-3 py-2 uppercase text-xs">{p.payment_mode || '—'}</td>
@@ -1430,6 +1578,41 @@ export default function ReportsSection() {
                     <td className="px-3 py-2 font-mono text-xs">{p.invoice_no || p.invoice_details?.invoice_no || '—'}</td>
                     <td className="px-3 py-2 uppercase text-xs">{p.payment_mode || '—'}</td>
                     <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums">₹{fmtMoney(p.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : dataTab === 'expenses' ? (
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 sticky top-0 text-[10px] uppercase text-gray-500">
+                <tr>
+                  <th className="px-3 py-2 text-left">#</th>
+                  <th className="px-3 py-2 text-left">Date</th>
+                  <th className="px-3 py-2 text-left">Voucher #</th>
+                  <th className="px-3 py-2 text-left">Paid to</th>
+                  {showSlipItemNames && <th className="px-3 py-2 text-left">Items</th>}
+                  <th className="px-3 py-2 text-left">Mode</th>
+                  <th className="px-3 py-2 text-right">Amount</th>
+                  <th className="px-3 py-2 text-left">Recorded by</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-50">
+                {expenses.length === 0 ? (
+                  <tr><td colSpan={showSlipItemNames ? 8 : 7} className="px-3 py-6 text-center text-gray-400">No expenses in this range</td></tr>
+                ) : expenses.map((e, i) => (
+                  <tr key={e.id} className="hover:bg-amber-50/40">
+                    <td className="px-3 py-2 text-gray-500">{i + 1}</td>
+                    <td className="px-3 py-2 whitespace-nowrap tabular-nums">{e.paid_at ? formatDateTime(e.paid_at) : '—'}</td>
+                    <td className="px-3 py-2 font-mono text-xs font-semibold text-amber-800">{e.slip_number || '—'}</td>
+                    <td className="px-3 py-2 font-medium">{e.paid_to || '—'}</td>
+                    {showSlipItemNames && (
+                      <td className="px-3 py-2 text-xs text-gray-700 max-w-[220px]">
+                        {getExpenseItemNames(e)}
+                      </td>
+                    )}
+                    <td className="px-3 py-2 uppercase text-xs">{e.payment_mode || '—'}</td>
+                    <td className="px-3 py-2 text-right font-bold text-amber-700 tabular-nums">₹{fmtMoney(e.total_amount)}</td>
+                    <td className="px-3 py-2 text-xs">{e.recorded_by_name || '—'}</td>
                   </tr>
                 ))}
               </tbody>

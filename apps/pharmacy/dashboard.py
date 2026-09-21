@@ -18,6 +18,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.inventory.models import MedicineBatch, StockLedger
+from apps.pharmacy.calculations import calculate_sale_gst_split
 from apps.pharmacy.margin_utils import resolve_invoice_item_unit_cost
 from apps.pharmacy.models import PharmacyInvoice, PharmacyPurchaseChallan
 from apps.shared.response import success_response
@@ -205,15 +206,33 @@ def _today_sales_block(pharmacy_id, date_from=None, date_to=None):
         inv_total = inv.grand_total or ZERO
         due = inv_total - (inv.paid_amount or ZERO)
         inv_margin = ZERO
+        invoice_med_margin_deltas = {}
+        invoice_med_revenue_deltas = {}
+
+        # Compute discount ratio once per invoice (uses saved subtotal/gst/grand_total)
+        pre_discount = (inv.subtotal or ZERO) + (inv.cgst or ZERO) + (inv.sgst or ZERO)
+        discount_ratio = Decimal("1")
+        if pre_discount > ZERO and inv.total_discount and inv.total_discount > ZERO:
+            discount_ratio = (inv.grand_total or ZERO) / pre_discount
+
         for it in inv.items.all():
             qty = it.qty or ZERO
             rate = it.rate or ZERO
+            line_base = qty * rate
+            line_revenue = line_base
+            if inv.gst_enabled:
+                cgst_amount, sgst_amount = calculate_sale_gst_split(
+                    taxable_line_total=line_base,
+                    cgst_rate=it.cgst_rate or ZERO,
+                    sgst_rate=it.sgst_rate or ZERO,
+                )
+                line_revenue = line_base + cgst_amount + sgst_amount
             unit_cost = resolve_invoice_item_unit_cost(it)
             # Only count margin when a valid cost price has been recorded
             item_margin = (rate - unit_cost) * qty if unit_cost is not None else ZERO
             inv_margin += item_margin
 
-            # Accumulate per-medicine totals
+            # Accumulate per-medicine totals (raw, pre-discount)
             mid = str(it.medicine_id) if it.medicine_id else "__unknown__"
             med_name = it.medicine.name if it.medicine_id and it.medicine else "Unknown"
             if mid not in med_map:
@@ -224,8 +243,22 @@ def _today_sales_block(pharmacy_id, date_from=None, date_to=None):
                     "total_margin": ZERO,
                 }
             med_map[mid]["total_qty"] += qty
-            med_map[mid]["total_revenue"] += qty * rate
+            med_map[mid]["total_revenue"] += line_revenue
             med_map[mid]["total_margin"] += item_margin
+            invoice_med_margin_deltas[mid] = invoice_med_margin_deltas.get(mid, ZERO) + item_margin
+            invoice_med_revenue_deltas[mid] = invoice_med_revenue_deltas.get(mid, ZERO) + line_revenue
+
+        # Apply discount ratio to inv_margin, per-medicine margin, and per-medicine revenue
+        if discount_ratio != Decimal("1"):
+            inv_margin = (inv_margin * discount_ratio).quantize(Decimal("0.01"))
+            for mid, raw_margin in invoice_med_margin_deltas.items():
+                adjusted = (raw_margin * discount_ratio).quantize(Decimal("0.01"))
+                med_map[mid]["total_margin"] -= raw_margin
+                med_map[mid]["total_margin"] += adjusted
+            for mid, raw_revenue in invoice_med_revenue_deltas.items():
+                adjusted_rev = (raw_revenue * discount_ratio).quantize(Decimal("0.01"))
+                med_map[mid]["total_revenue"] -= raw_revenue
+                med_map[mid]["total_revenue"] += adjusted_rev
 
         by_method[key]["amount"] += inv_total
         by_method[key]["margin"] += inv_margin

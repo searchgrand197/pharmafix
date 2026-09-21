@@ -1,5 +1,5 @@
-const CACHE_NAME = 'hms-app-v4'
-const API_CACHE = 'hms-api-v4'
+const CACHE_NAME = 'hms-app-v5'
+const API_CACHE = 'hms-api-v5'
 
 const PRECACHE_URLS = [
   '/',

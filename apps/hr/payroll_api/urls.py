@@ -1,0 +1,83 @@
+from django.urls import path
+
+from apps.hr.payroll_api.views import (
+    CompensationLevelAssignView,
+    CompensationLevelDetailView,
+    CompensationLevelListView,
+    DepartmentSalaryStructureAssignView,
+    DepartmentSalaryStructureListView,
+    DepartmentSalaryStructureOptionsView,
+    EmployeeCompensationAssignmentListView,
+    EmployeeCompensationOverrideListView,
+    EmployeeCompensationPreviewView,
+    EmployeeDepartmentStructurePreviewView,
+    PayrollGenerateView,
+    PayrollPayslipListView,
+    PayrollRunApproveView,
+    PayrollRunDetailView,
+    PayrollRunListView,
+    PayrollRunLockView,
+    PayrollRunPublishView,
+    PayrollRunRecalculateView,
+    SalaryStructureAssignView,
+    SalaryStructureHistoryView,
+    SalaryStructureListView,
+    SalaryStructureOptionsView,
+)
+
+urlpatterns = [
+    path('compensation-levels/', CompensationLevelListView.as_view(), name='payroll-compensation-levels-list'),
+    path(
+        'compensation-levels/<uuid:pk>/',
+        CompensationLevelDetailView.as_view(),
+        name='payroll-compensation-levels-detail',
+    ),
+    path(
+        'compensation-levels/<uuid:pk>/assign-employees/',
+        CompensationLevelAssignView.as_view(),
+        name='payroll-compensation-levels-assign',
+    ),
+    path(
+        'compensation-assignments/',
+        EmployeeCompensationAssignmentListView.as_view(),
+        name='payroll-compensation-assignments',
+    ),
+    path(
+        'compensation-overrides/',
+        EmployeeCompensationOverrideListView.as_view(),
+        name='payroll-compensation-overrides',
+    ),
+    path(
+        'compensation/preview/',
+        EmployeeCompensationPreviewView.as_view(),
+        name='payroll-compensation-preview',
+    ),
+    path('department-structures/', DepartmentSalaryStructureListView.as_view(), name='payroll-dept-structures-list'),
+    path(
+        'department-structures/options/',
+        DepartmentSalaryStructureOptionsView.as_view(),
+        name='payroll-dept-structures-options',
+    ),
+    path(
+        'department-structures/<uuid:pk>/assign-employees/',
+        DepartmentSalaryStructureAssignView.as_view(),
+        name='payroll-dept-structures-assign',
+    ),
+    path('structures/', SalaryStructureListView.as_view(), name='payroll-structures-list'),
+    path('structures/options/', SalaryStructureOptionsView.as_view(), name='payroll-structures-options'),
+    path(
+        'structures/department-preview/',
+        EmployeeDepartmentStructurePreviewView.as_view(),
+        name='payroll-structures-dept-preview',
+    ),
+    path('structures/history/', SalaryStructureHistoryView.as_view(), name='payroll-structures-history'),
+    path('structures/assign/', SalaryStructureAssignView.as_view(), name='payroll-structures-assign'),
+    path('run/', PayrollGenerateView.as_view(), name='payroll-run-generate'),
+    path('runs/', PayrollRunListView.as_view(), name='payroll-runs-list'),
+    path('run/<uuid:pk>/', PayrollRunDetailView.as_view(), name='payroll-run-detail'),
+    path('run/<uuid:pk>/approve/', PayrollRunApproveView.as_view(), name='payroll-run-approve'),
+    path('run/<uuid:pk>/lock/', PayrollRunLockView.as_view(), name='payroll-run-lock'),
+    path('run/<uuid:pk>/recalculate/', PayrollRunRecalculateView.as_view(), name='payroll-run-recalculate'),
+    path('run/<uuid:pk>/publish/', PayrollRunPublishView.as_view(), name='payroll-run-publish'),
+    path('payslips/', PayrollPayslipListView.as_view(), name='payroll-payslips-list'),
+]

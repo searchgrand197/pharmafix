@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Error</title>
+    <style>
+        body {
+            font-family: 'Arial', sans-serif;
+            background: linear-gradient(135deg, #ff9a9e 0%, #fecfef 100%);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            max-width: 600px;
+            padding: 40px;
+            text-align: center;
+        }
+        .icon {
+            font-size: 80px;
+            color: #dc3545;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #dc3545;
+            margin-bottom: 10px;
+        }
+        .message {
+            color: #333;
+            font-size: 18px;
+            line-height: 1.6;
+            margin-bottom: 30px;
+        }
+        .error {
+            background: #f8d7da;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            color: #721c24;
+            font-size: 14px;
+        }
+        .footer {
+            color: #999;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">!</div>
+        <h1>Error</h1>
+        
+        <p class="message">
+            An error occurred while processing your request.
+        </p>
+        
+        {% if error %}
+        <div class="error">
+            {{ error }}
+        </div>
+        {% endif %}
+        
+        <p class="message">
+            Please try again later or contact our HR team for assistance.
+        </p>
+        
+        <div class="footer">
+            If the problem persists, please contact technical support.
+        </div>
+    </div>
+</body>
+</html>

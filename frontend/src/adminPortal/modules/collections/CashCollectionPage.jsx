@@ -3,7 +3,7 @@ import { format, startOfMonth } from 'date-fns';
 import { formatDateTime, useTimeDisplayMode } from '@/utils/dateTimeFormat';
 
 function formatHandoverDateTime(iso) {
-  return formatDateTime(iso, { withSeconds: true });
+  return formatDateTime(iso, {});
 }
 import {
   Alert,

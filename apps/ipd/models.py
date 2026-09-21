@@ -55,6 +55,7 @@ class IPDAdmission(SoftDeleteModel, TimeStampedModel, UUIDPrimaryKeyModel):
     )
 
     admission_date = models.DateField()
+    admission_time = models.TimeField(null=True, blank=True)
     expected_discharge_date = models.DateField(null=True, blank=True)
 
     assigned_doctor = models.ForeignKey(
@@ -159,4 +160,46 @@ class IPDTransferHistory(TimeStampedModel, UUIDPrimaryKeyModel):
 
     changed_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     notes = models.TextField(blank=True, default="")
+
+
+class IPDDailyProcessLog(TimeStampedModel, UUIDPrimaryKeyModel):
+    """One structured daily process log per IPD admission per calendar date."""
+
+    admission = models.ForeignKey(IPDAdmission, on_delete=models.CASCADE, related_name="process_logs")
+    hospital = models.ForeignKey(Hospital, on_delete=models.PROTECT, related_name="ipd_process_logs")
+    log_date = models.DateField(db_index=True)
+    day_number = models.PositiveIntegerField(null=True, blank=True)
+
+    vitals = models.JSONField(default=dict, blank=True)
+    medication_procedure_notes = models.TextField(blank=True, default="")
+    completed_notes = models.TextField(blank=True, default="")
+    pending_notes = models.TextField(blank=True, default="")
+    general_notes = models.TextField(blank=True, default="")
+    custom_fields = models.JSONField(default=dict, blank=True)
+    process_template_id = models.CharField(max_length=64, blank=True, default="")
+    process_field_config = models.JSONField(default=dict, blank=True)
+
+    recorded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="ipd_process_logs_recorded",
+    )
+
+    class Meta:
+        ordering = ["-log_date", "-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["admission", "log_date"],
+                name="ipd_unique_process_log_per_day",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["admission", "log_date"]),
+            models.Index(fields=["hospital", "log_date"]),
+        ]
+
+    def __str__(self) -> str:
+        return f"Process log {self.log_date} – {self.admission_id}"
 

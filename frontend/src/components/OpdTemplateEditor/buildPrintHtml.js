@@ -20,7 +20,153 @@ function esc(str) {
     .replace(/"/g, '&quot;')
 }
 
-export function buildPrintHtml(layout, values, withBackground, opdFieldConfig) {
+function buildRxBoxHtml(layout, rxPrintData, printOffsetX, printOffsetY) {
+  const box = layout?.rx_box
+  if (!box || typeof box !== 'object') return ''
+
+  const x = typeof box.x === 'number' ? box.x : 50
+  const y = typeof box.y === 'number' ? box.y : 580
+  const w = typeof box.width === 'number' ? box.width : 924
+  const h = typeof box.height === 'number' ? box.height : 580
+  const left = (((x + printOffsetX) / CANVAS_W) * 100).toFixed(4)
+  const top = (((y + printOffsetY) / CANVAS_H) * 100).toFixed(4)
+  const boxW = ((w / CANVAS_W) * 100).toFixed(4)
+  const boxH = ((h / CANVAS_H) * 100).toFixed(4)
+  const fontSize = Number(box.fontSize) || 10
+  const fs = ((fontSize / 600) * 100).toFixed(4)
+  const showQty = box.showQty !== false
+  const showTiming = box.showTiming !== false
+
+  const data = rxPrintData && typeof rxPrintData === 'object' ? rxPrintData : {}
+  const parts = []
+
+  const cc = String(data.chiefComplaint || '').trim()
+  if (cc) {
+    parts.push('<div style="margin-bottom:0.35em;"><strong>Chief Complaint:</strong> ' + esc(cc) + '</div>')
+  }
+
+  const rxItems = Array.isArray(data.rxItems) ? data.rxItems : []
+  if (rxItems.length > 0) {
+    let table = '<div style="margin:0.3em 0;font-weight:700;border-bottom:1px solid #374151;padding-bottom:0.2em;">Prescription</div>'
+    table += '<table style="width:100%;border-collapse:collapse;font-size:inherit;">'
+    table += '<tr style="font-weight:600;border-bottom:1px solid #9ca3af;">'
+    table += '<td style="padding:2px 4px;">Medicine</td>'
+    table += '<td style="padding:2px 4px;">Dosage</td>'
+    table += '<td style="padding:2px 4px;">Days</td>'
+    if (showQty) table += '<td style="padding:2px 4px;">Qty</td>'
+    if (showTiming) table += '<td style="padding:2px 4px;">Timing</td>'
+    table += '</tr>'
+    rxItems.forEach((item) => {
+      const name = esc(String(item.name || '').trim())
+      const manualTag = item.isManual ? ' <span style="color:#92400e;font-size:0.9em;">(manual)</span>' : ''
+      table += '<tr>'
+      table += '<td style="padding:2px 4px;vertical-align:top;">' + name + manualTag + '</td>'
+      table += '<td style="padding:2px 4px;">' + esc(String(item.pattern || '')) + '</td>'
+      table += '<td style="padding:2px 4px;">' + esc(String(item.days ?? '')) + '</td>'
+      if (showQty) table += '<td style="padding:2px 4px;">' + esc(String(item.qty ?? '')) + '</td>'
+      if (showTiming) table += '<td style="padding:2px 4px;">' + esc(String(item.timing || '')) + '</td>'
+      table += '</tr>'
+    })
+    table += '</table>'
+    parts.push(table)
+  }
+
+  const notes = Array.isArray(data.notes) ? data.notes.filter((n) => String(n).trim()) : []
+  if (notes.length > 0) {
+    parts.push('<div style="margin-top:0.35em;"><strong>Notes:</strong> ' + notes.map((n) => esc(n)).join('; ') + '</div>')
+  }
+
+  const fup = String(data.followUpDate || '').trim()
+  if (fup) {
+    parts.push('<div style="margin-top:0.35em;"><strong>Follow-up:</strong> ' + esc(fup) + '</div>')
+  }
+
+  const inner = parts.length > 0
+    ? parts.join('')
+    : '<div style="color:#9ca3af;font-style:italic;">Prescription area</div>'
+
+  return (
+    '<div class="opd-rx-box" style="position:absolute;left:' + left + '%;top:' + top + '%;width:' + boxW + '%;height:' + boxH +
+    '%;z-index:3;overflow:hidden;box-sizing:border-box;padding:4px 6px;font-size:' + fs +
+    'cqw;font-family:system-ui,sans-serif;color:#111;line-height:1.35;">' + inner + '</div>'
+  )
+}
+
+function buildAutoPrintScript() {
+  return [
+    '(function () {',
+    '  var finalized = false;',
+    '  function finalize() {',
+    '    if (finalized) return;',
+    '    finalized = true;',
+    '    try { window.location.replace("about:blank"); } catch (e) {}',
+    '    setTimeout(function () {',
+    '      try { window.close(); } catch (e) {}',
+    '    }, 50);',
+    '  }',
+    '  window.addEventListener("afterprint", finalize, { once: true });',
+    '  window.addEventListener("focus", function () { setTimeout(finalize, 200); }, { once: true });',
+    '  setTimeout(finalize, 120000);',
+    '  function triggerPrint() {',
+    '    setTimeout(function () {',
+    '      try { window.print(); } catch (e) { finalize(); }',
+    '    }, 0);',
+    '  }',
+    '  if (document.readyState === "complete") { triggerPrint(); }',
+    '  else { window.addEventListener("load", triggerPrint, { once: true }); }',
+    '})();',
+  ].join('\n')
+}
+
+/** Prescription-only print: no background, no patient fields — just rx box content at saved position. */
+export function buildRxOnlyPrintHtml(layout, rxPrintData) {
+  const printOffsetX = typeof layout.printOffsetX === 'number' ? layout.printOffsetX : 0
+  const printOffsetY = typeof layout.printOffsetY === 'number' ? layout.printOffsetY : 0
+  const rxBoxHtml = buildRxBoxHtml(layout, rxPrintData, printOffsetX, printOffsetY)
+  const inlineScript = buildAutoPrintScript()
+
+  const parts = [
+    '<!DOCTYPE html>',
+    '<html lang="en">',
+    '<head>',
+    '<meta charset="UTF-8" />',
+    '<title>Prescription Print</title>',
+    '<style>',
+    '@page { size: A4 portrait; margin: 0; marks: none; }',
+    '*, *::before, *::after { box-sizing: border-box; }',
+    'html, body { margin: 0; padding: 0; background: #fff; }',
+    'table { border-collapse: collapse; }',
+    'td, th { box-sizing: border-box; overflow: hidden; }',
+    '.opd-generator-wrap {',
+    '  width: 210mm; aspect-ratio: 210 / 297; height: auto;',
+    '  position: relative; background: #ffffff;',
+    '  container-type: inline-size; overflow: hidden;',
+    '}',
+    '.template-editor-canvas { position: relative; width: 100%; height: 100%; }',
+    '@media print {',
+    '  @page { size: A4 portrait; margin: 0; marks: none; }',
+    '  html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }',
+    '  .opd-generator-wrap { width: 210mm !important; }',
+    '}',
+    '</style>',
+    '</head>',
+    '<body>',
+    '<div class="opd-generator-wrap">',
+    '  <div class="template-editor-canvas">',
+    '    ' + rxBoxHtml,
+    '  </div>',
+    '</div>',
+    '<' + 'script' + '>',
+    inlineScript,
+    '</' + 'script' + '>',
+    '</body>',
+    '</html>',
+  ]
+
+  return parts.join('\n')
+}
+
+export function buildPrintHtml(layout, values, withBackground, opdFieldConfig, rxPrintData = null) {
   const printOffsetX    = typeof layout.printOffsetX === 'number' ? layout.printOffsetX : 0
   const printOffsetY    = typeof layout.printOffsetY === 'number' ? layout.printOffsetY : 0
   const showFieldLabels = layout.showFieldLabels === true
@@ -176,36 +322,15 @@ export function buildPrintHtml(layout, values, withBackground, opdFieldConfig) {
 
   // ── Timestamp ────────────────────────────────────────────────────────────────
   const dPrinted = new Date()
-  const printedAtStr = esc(formatDateTime(dPrinted, { withSeconds: true }))
+  const printedAtStr = esc(formatDateTime(dPrinted, {}))
   const printedAtHtml = '<div class="opd-printed-at">Printed at: ' + printedAtStr + '</div>'
+  const rxBoxHtml = buildRxBoxHtml(layout, rxPrintData, printOffsetX, printOffsetY)
 
   const bgTag         = showBg ? '<img src="' + bgSrc + '" alt="" />' : ''
   const chromeDisplay = showChrome ? 'flex' : 'none'
   const imgDisplay    = showBg    ? 'block' : 'none'
 
-  const inlineScript = [
-    '(function () {',
-    '  var finalized = false;',
-    '  function finalize() {',
-    '    if (finalized) return;',
-    '    finalized = true;',
-    '    try { window.location.replace("about:blank"); } catch (e) {}',
-    '    setTimeout(function () {',
-    '      try { window.close(); } catch (e) {}',
-    '    }, 50);',
-    '  }',
-    '  window.addEventListener("afterprint", finalize, { once: true });',
-    '  window.addEventListener("focus", function () { setTimeout(finalize, 200); }, { once: true });',
-    '  setTimeout(finalize, 120000);',
-    '  function triggerPrint() {',
-    '    setTimeout(function () {',
-    '      try { window.print(); } catch (e) { finalize(); }',
-    '    }, 0);',
-    '  }',
-    '  if (document.readyState === "complete") { triggerPrint(); }',
-    '  else { window.addEventListener("load", triggerPrint, { once: true }); }',
-    '})();',
-  ].join('\n')
+  const inlineScript = buildAutoPrintScript()
 
   const parts = [
     '<!DOCTYPE html>',
@@ -362,6 +487,7 @@ export function buildPrintHtml(layout, values, withBackground, opdFieldConfig) {
     '    ' + tableBoxes,
     '    ' + fieldBoxes,
     '    ' + noteBoxes,
+    '    ' + rxBoxHtml,
     '    ' + printedAtHtml,
     '  </div>',
     '</div>',

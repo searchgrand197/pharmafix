@@ -103,8 +103,8 @@ const MANIFEST_BASE = {
     theme_color: '#0f172a',
     background_color: '#ffffff',
     icons: [
-      { src: '/icons/icon-doctor-192.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
-      { src: '/icons/icon-doctor-512.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-doctor-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-doctor-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
     ],
     description: 'Doctor web app',
   },
@@ -116,8 +116,8 @@ const MANIFEST_BASE = {
     theme_color: '#0f172a',
     background_color: '#ffffff',
     icons: [
-      { src: '/icons/icon-pharmacy-192.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
-      { src: '/icons/icon-pharmacy-512.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-pharmacy-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-pharmacy-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
     ],
     description: 'Pharmacy web app',
   },
@@ -129,8 +129,8 @@ const MANIFEST_BASE = {
     theme_color: '#0f172a',
     background_color: '#ffffff',
     icons: [
-      { src: '/icons/icon-reception-192.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
-      { src: '/icons/icon-reception-512.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-reception-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-reception-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
     ],
     description: 'Reception web app',
   },
@@ -142,8 +142,8 @@ const MANIFEST_BASE = {
     theme_color: '#0f172a',
     background_color: '#ffffff',
     icons: [
-      { src: '/icons/icon-staff-192.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
-      { src: '/icons/icon-staff-512.png', sizes: '1024x1024', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-staff-192.png', sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+      { src: '/icons/icon-staff-512.png', sizes: '512x512', type: 'image/png', purpose: 'any maskable' },
     ],
     description: 'Staff web app',
   },
@@ -161,11 +161,23 @@ MANIFEST_BASE.admin = {
   description: 'Admin web app',
 }
 
+/** Same-origin manifest URL (installable; blob: URLs break Chrome PWA install). */
+export function getPwaManifestUrl(roleKey, hospitalId) {
+  const portal = roleKey && MANIFEST_BASE[roleKey] ? roleKey : 'staff'
+  const params = new URLSearchParams()
+  if (hospitalId != null && String(hospitalId).trim() !== '') {
+    params.set('hospital_id', String(hospitalId).trim())
+  }
+  const qs = params.toString()
+  return `/api/v1/pwa/manifest/${portal}/${qs ? `?${qs}` : ''}`
+}
+
 /**
  * @param {string} roleKey
  * @param {string} [hospitalName]
  * @param {ReceptionPortalRow | null} [profile]
  * @returns {string} blob: URL — caller must URL.revokeObjectURL when replacing
+ * @deprecated Use getPwaManifestUrl — blob manifests are not installable in Chrome
  */
 export function createManifestBlobUrl(roleKey, hospitalName, profile) {
   const displayName = (hospitalName && String(hospitalName).trim()) || getHospitalNameForTab()

@@ -25,6 +25,7 @@ from apps.shared.cancel_service import (
     void_payment_slip_sequence,
 )
 from apps.opd.models import OPDVisit
+from apps.expenses.models import ExpenseTransaction
 from apps.payments.models import CashHandover, PaymentQuickCategory, PaymentQuickService, PaymentTransaction
 from apps.settings_management.models import ReceptionPortalSettings
 from apps.payments.serializers import PaymentTransactionCreateSerializer, PaymentTransactionSerializer
@@ -380,6 +381,27 @@ def _collection_opd_queryset(hospital_id, *, user_id=None, since=None, date_from
     return opd_qs
 
 
+def _collection_expense_queryset(hospital_id, *, user_id=None, since=None, date_from=None, date_to=None, source=None):
+    """Return active expenses. Pass source='collection' to restrict to those that affect the balance."""
+    expense_qs = ExpenseTransaction.objects.filter(
+        hospital_id=hospital_id,
+        voided=False,
+        status=ExpenseTransaction.Status.SUCCESS,
+        is_deleted=False,
+    )
+    if source:
+        expense_qs = expense_qs.filter(source=source)
+    if user_id:
+        expense_qs = expense_qs.filter(recorded_by_id=user_id)
+    if since:
+        expense_qs = expense_qs.filter(paid_at__gt=since)
+    if date_from:
+        expense_qs = expense_qs.filter(paid_at__date__gte=date_from)
+    if date_to:
+        expense_qs = expense_qs.filter(paid_at__date__lte=date_to)
+    return expense_qs
+
+
 def _build_collection_snapshot_for_scope(
     hospital_id,
     *,
@@ -395,6 +417,10 @@ def _build_collection_snapshot_for_scope(
         hospital_id, user_id=user_id, since=since, date_from=date_from, date_to=date_to
     )
     opd_qs = _collection_opd_queryset(hospital_id, user_id=user_id, since=since, date_from=date_from, date_to=date_to)
+    expense_qs = _collection_expense_queryset(
+        hospital_id, user_id=user_id, since=since, date_from=date_from, date_to=date_to,
+        source=ExpenseTransaction.Source.COLLECTION,
+    )
 
     payment_cash = (
         payment_qs.filter(payment_mode=PaymentTransaction.PaymentMode.CASH).aggregate(t=Sum("amount"))["t"] or _cash_zero()
@@ -413,6 +439,21 @@ def _build_collection_snapshot_for_scope(
     opd_upi = opd_qs.filter(payment_mode=OPDVisit.PaymentMode.UPI).aggregate(t=Sum("amount"))["t"] or _cash_zero()
     opd_other = opd_qs.filter(payment_mode=OPDVisit.PaymentMode.OTHER).aggregate(t=Sum("amount"))["t"] or _cash_zero()
 
+    expense_cash = (
+        expense_qs.filter(payment_mode=ExpenseTransaction.PaymentMode.CASH).aggregate(t=Sum("total_amount"))["t"]
+        or _cash_zero()
+    )
+    expense_upi = (
+        expense_qs.filter(payment_mode=ExpenseTransaction.PaymentMode.UPI).aggregate(t=Sum("total_amount"))["t"]
+        or _cash_zero()
+    )
+    expense_other = (
+        expense_qs.exclude(
+            payment_mode__in=[ExpenseTransaction.PaymentMode.CASH, ExpenseTransaction.PaymentMode.UPI]
+        ).aggregate(t=Sum("total_amount"))["t"]
+        or _cash_zero()
+    )
+
     opening_cash = _cash_zero()
     if include_opening_cash and shift_reset_user:
         incoming_qs = CashHandover.objects.filter(
@@ -424,9 +465,9 @@ def _build_collection_snapshot_for_scope(
             incoming_qs = incoming_qs.filter(accepted_at__gt=since)
         opening_cash = incoming_qs.aggregate(t=Sum("declared_cash_amount"))["t"] or _cash_zero()
 
-    cash_total = _decimal_2(opening_cash + payment_cash + opd_cash)
-    upi_total = _decimal_2(payment_upi + opd_upi)
-    other_total = _decimal_2(payment_other + opd_other)
+    cash_total = _decimal_2(opening_cash + payment_cash + opd_cash - expense_cash)
+    upi_total = _decimal_2(payment_upi + opd_upi - expense_upi)
+    other_total = _decimal_2(payment_other + opd_other - expense_other)
     grand_total = _decimal_2(cash_total + upi_total + other_total)
 
     payload = {
@@ -459,6 +500,9 @@ def _build_collection_entries_for_scope(
     opd_qs = _collection_opd_queryset(
         hospital_id, user_id=user_id, since=since, date_from=date_from, date_to=date_to
     ).select_related("patient", "created_by")
+    expense_qs = _collection_expense_queryset(
+        hospital_id, user_id=user_id, since=since, date_from=date_from, date_to=date_to,
+    ).select_related("recorded_by")
 
     rows = []
     for p in payment_qs:
@@ -498,6 +542,24 @@ def _build_collection_entries_for_scope(
                 "created_by_name": v.created_by.full_name if v.created_by_id else "",
                 "entry_time": v.created_at.isoformat(),
                 "entry_ref": "OPD",
+            }
+        )
+
+    for expense in expense_qs:
+        is_other_funds = getattr(expense, "source", None) == ExpenseTransaction.Source.OTHER_FUNDS
+        rows.append(
+            {
+                "id": str(expense.id),
+                "entry_type": "expense",
+                "expense_source": expense.source if hasattr(expense, "source") else "collection",
+                "token_number": None,
+                "queue_number": None,
+                "patient_name": expense.paid_to or "Expense",
+                "amount": _format_money(_cash_zero() if is_other_funds else -_decimal_2(expense.total_amount)),
+                "payment_mode": expense.payment_mode or "cash",
+                "created_by_name": expense.recorded_by.full_name if expense.recorded_by_id else "",
+                "entry_time": expense.paid_at.isoformat() if expense.paid_at else expense.created_at.isoformat(),
+                "entry_ref": expense.slip_number or "",
             }
         )
 

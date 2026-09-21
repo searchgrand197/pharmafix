@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from django.db.models import F
+from django.utils import timezone
 from rest_framework import permissions, status, viewsets
 from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
@@ -11,6 +13,7 @@ from apps.doctors.models import (
     DoctorPortalPreference,
     DoctorProfile,
     DoctorWeeklySchedule,
+    HospitalCustomRxSalt,
     Specialty,
 )
 from apps.doctors.serializers import (
@@ -21,6 +24,7 @@ from apps.doctors.serializers import (
     DoctorProfileSerializer,
     DoctorWeeklyScheduleCreateUpdateSerializer,
     DoctorWeeklyScheduleSerializer,
+    HospitalCustomRxSaltSerializer,
     SpecialtyCreateUpdateSerializer,
     SpecialtySerializer,
 )
@@ -331,3 +335,51 @@ class DoctorPortalPreferenceView(APIView):
         return success_response(data=serializer.data)
 
     patch = put
+
+
+class HospitalCustomRxSaltListCreateView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, *args, **kwargs):
+        hospital_id = getattr(request.user, "hospital_id", None)
+        if not hospital_id:
+            return Response({"detail": "Hospital not set."}, status=status.HTTP_400_BAD_REQUEST)
+        qs = (
+            HospitalCustomRxSalt.objects.filter(hospital_id=hospital_id)
+            .order_by("-last_used_at")[:200]
+        )
+        data = HospitalCustomRxSaltSerializer(qs, many=True).data
+        return success_response(data=data)
+
+    def post(self, request, *args, **kwargs):
+        hospital_id = getattr(request.user, "hospital_id", None)
+        if not hospital_id:
+            return Response({"detail": "Hospital not set."}, status=status.HTTP_400_BAD_REQUEST)
+
+        serializer = HospitalCustomRxSaltSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        name = serializer.validated_data["name"]
+        normalized = name.lower().strip()
+
+        obj, created = HospitalCustomRxSalt.objects.get_or_create(
+            hospital_id=hospital_id,
+            normalized_name=normalized,
+            defaults={
+                "name": name,
+                "created_by": request.user,
+                "last_used_at": timezone.now(),
+                "use_count": 1,
+            },
+        )
+        if not created:
+            HospitalCustomRxSalt.objects.filter(pk=obj.pk).update(
+                name=name,
+                last_used_at=timezone.now(),
+                use_count=F("use_count") + 1,
+            )
+            obj.refresh_from_db()
+
+        return success_response(
+            data=HospitalCustomRxSaltSerializer(obj).data,
+            message="Custom medicine saved." if created else "Custom medicine updated.",
+        )

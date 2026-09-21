@@ -4,6 +4,7 @@ from .models import (
     IPDAdmission,
     IPDAdmissionSequence,
     IPDAdmissionStatusHistory,
+    IPDDailyProcessLog,
     IPDTransferHistory,
     Scheme,
 )
@@ -36,3 +37,10 @@ class IPDAdmissionStatusHistoryAdmin(admin.ModelAdmin):
 @admin.register(IPDTransferHistory)
 class IPDTransferHistoryAdmin(admin.ModelAdmin):
     list_display = ("id", "admission", "from_bed_code", "to_bed_code", "created_at")
+
+
+@admin.register(IPDDailyProcessLog)
+class IPDDailyProcessLogAdmin(admin.ModelAdmin):
+    list_display = ("id", "admission", "log_date", "day_number", "recorded_by", "created_at")
+    list_filter = ("hospital", "log_date")
+    search_fields = ("admission__ipd_no", "admission__id")

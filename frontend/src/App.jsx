@@ -1,20 +1,95 @@
-import React, { Suspense, lazy, useEffect, useState, useRef } from 'react'
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import React, { Suspense, lazy, useEffect, useState } from 'react'
+import { Routes, Route, Navigate, useLocation, useParams } from 'react-router-dom'
 import Login from './pages/Login'
 import ChangePassword from './pages/ChangePassword'
 import api from './api'
 import { useAuthStore } from './stores/authStore'
 import { resolvePortalFromPath } from './themes'
 import {
-  createManifestBlobUrl,
-  getHospitalBrandingProfile,
   getHospitalNameForTab,
+  getPwaManifestUrl,
   HOSPITAL_BRANDING_CHANGED,
   syncHospitalBrandingFromApiRow,
 } from './utils/hospitalBranding'
 import { syncTimeDisplayModeFromRow } from './utils/dateTimeFormat'
 import { AppRoutes as AdminRoutes } from './adminPortal/routes/AppRoutes'
 import { ToastProvider } from './adminPortal/context/ToastContext'
+
+// Lazy-load all HR and Employee pages to keep the initial bundle tiny
+const HRShellLayout = lazy(() => import('./components/HR/HRShellLayout'))
+const HRHomeRedirect = lazy(() => import('./pages/hr/HRHomeRedirect'))
+const JourneyCenterPage = lazy(() => import('./pages/hr/JourneyCenterPage'))
+const JourneyCenterDashboardPage = lazy(() => import('./pages/hr/JourneyCenterDashboardPage'))
+const HRReportsPlaceholderPage = lazy(() => import('./pages/hr/HRReportsPlaceholderPage'))
+const RecruitmentJobsPage = lazy(() => import('./pages/hr/RecruitmentJobsPage'))
+const RecruitmentCandidatesPage = lazy(() => import('./pages/hr/RecruitmentCandidatesPage'))
+const RecruitmentInterviewsPage = lazy(() => import('./pages/hr/RecruitmentInterviewsPage'))
+const RecruitmentOffersPage = lazy(() => import('./pages/hr/RecruitmentOffersPage'))
+const OnboardingLegacyRedirect = lazy(() => import('./pages/hr/OnboardingLegacyRedirect'))
+const OnboardingDocumentVerificationPage = lazy(() => import('./pages/hr/OnboardingDocumentVerificationPage'))
+const OnboardingPendingDocumentsPage = lazy(() => import('./pages/hr/OnboardingPendingDocumentsPage'))
+const ManualEmployeeCreatePage = lazy(() => import('./pages/hr/ManualEmployeeCreatePage'))
+const DesignationsPage = lazy(() => import('./pages/hr/DesignationsPage'))
+const EmployeeDirectoryPage = lazy(() => import('./pages/hr/EmployeeDirectoryPage'))
+const InactiveEmployeeDirectoryPage = lazy(() => import('./pages/hr/InactiveEmployeeDirectoryPage'))
+const OperationsDepartmentsPage = lazy(() => import('./pages/hr/OperationsDepartmentsPage'))
+const OperationsAttendancePage = lazy(() => import('./pages/hr/OperationsAttendancePage'))
+const ShiftManagementPage = lazy(() => import('./pages/hr/ShiftManagementPage'))
+const ShiftFormPage = lazy(() => import('./pages/hr/ShiftFormPage'))
+const PunchLogsPage = lazy(() => import('./pages/hr/PunchLogsPage'))
+const BiometricUnlinkedUsersPage = lazy(() => import('./pages/hr/BiometricUnlinkedUsersPage'))
+const BiometricRejectedPunchesPage = lazy(() => import('./pages/hr/BiometricRejectedPunchesPage'))
+const AttendanceControlPage = lazy(() => import('./pages/hr/AttendanceControlPage'))
+const AttendanceCalendarPage = lazy(() => import('./pages/hr/AttendanceCalendarPage'))
+const GenerateTestAttendancePage = lazy(() => import('./pages/hr/GenerateTestAttendancePage'))
+const EmployeeAttendancePage = lazy(() => import('./pages/hr/EmployeeAttendancePage'))
+const RegularizationRequestsPage = lazy(() => import('./pages/hr/RegularizationRequestsPage'))
+const LeaveTypesPage = lazy(() => import('./pages/hr/leave/LeaveTypesPage'))
+const LeavePoliciesPage = lazy(() => import('./pages/hr/leave/LeavePoliciesPage'))
+const LeavePolicyFormPage = lazy(() => import('./pages/hr/leave/LeavePolicyFormPage'))
+const LeaveBalancesPage = lazy(() => import('./pages/hr/leave/LeaveBalancesPage'))
+const LeaveRequestsPage = lazy(() => import('./pages/hr/leave/LeaveRequestsPage'))
+const OperationsSalaryPage = lazy(() => import('./pages/hr/OperationsSalaryPage'))
+const OperationsPerformancePage = lazy(() => import('./pages/hr/OperationsPerformancePage'))
+const JobCandidates = lazy(() => import('./pages/JobCandidates'))
+const CandidateDetail = lazy(() => import('./pages/CandidateDetail'))
+const JobForm = lazy(() => import('./pages/JobForm'))
+const DepartmentForm = lazy(() => import('./pages/DepartmentForm'))
+const OfferTemplateBuilder = lazy(() => import('./pages/OfferTemplateBuilder'))
+const OfferLetterBuilderV2 = lazy(() => import('./pages/OfferLetterBuilderV2'))
+const OfferDrafts = lazy(() => import('./pages/OfferDrafts'))
+const DocumentUpload = lazy(() => import('./components/Onboarding/DocumentUpload'))
+const EmployeeDetail = lazy(() => import('./pages/EmployeeDetail'))
+const EmployeeDocuments = lazy(() => import('./pages/EmployeeDocuments'))
+const ChecklistRules = lazy(() => import('./pages/ChecklistRules'))
+const OrganizationSettingsPage = lazy(() => import('./pages/hr/OrganizationSettingsPage'))
+const OrganizationDetailsPage = lazy(() => import('./pages/hr/OrganizationDetailsPage'))
+const EmployeeShellLayout = lazy(() => import('./components/Employee/EmployeeShellLayout'))
+const EmployeeDashboardPage = lazy(() => import('./pages/employee/EmployeeDashboardPage'))
+const EmployeePortalAttendancePage = lazy(() => import('./pages/employee/EmployeePortalAttendancePage'))
+const EmployeeLeavesPage = lazy(() => import('./pages/employee/EmployeeLeavesPage'))
+const EmployeeProfilePage = lazy(() => import('./pages/employee/EmployeeProfilePage'))
+const EmployeeChangePasswordPage = lazy(() => import('./pages/employee/EmployeeChangePasswordPage'))
+const EmployeeDocumentsPage = lazy(() => import('./pages/employee/EmployeeDocumentsPage'))
+const EmployeeNotificationsPage = lazy(() => import('./pages/employee/EmployeeNotificationsPage'))
+const EmployeeHolidaysPage = lazy(() => import('./pages/employee/EmployeeHolidaysPage'))
+const EmployeePayslipsPage = lazy(() => import('./pages/employee/EmployeePayslipsPage'))
+const EmployeePayslipDetailPage = lazy(() => import('./pages/employee/EmployeePayslipDetailPage'))
+const HolidayManagementPage = lazy(() => import('./pages/hr/HolidayManagementPage'))
+const SalaryStructuresPage = lazy(() => import('./pages/hr/payroll/SalaryStructuresPage'))
+const CompensationLevelsPage = lazy(() => import('./pages/hr/payroll/DesignationSalaryStructuresPage'))
+const CompensationLevelFormPage = lazy(() => import('./pages/hr/payroll/CompensationLevelFormPage'))
+const PayrollRunsPage = lazy(() => import('./pages/hr/payroll/PayrollRunsPage'))
+const PayrollRunDetailPage = lazy(() => import('./pages/hr/payroll/PayrollRunDetailPage'))
+const PayrollPayslipsPage = lazy(() => import('./pages/hr/payroll/PayrollPayslipsPage'))
+const AssignSalaryStructurePage = lazy(() => import('./pages/hr/payroll/AssignSalaryStructurePage'))
+import { USE_NEW_OFFER_BUILDER } from './api'
+import {
+  AuthenticatedRoute,
+  EmployeeAuthRoute,
+  EmployeeRoute,
+  HRRoute,
+} from './components/RouteGuards'
 
 const StaffPortal = lazy(() => import('./pages/StaffPortal'))
 const DoctorPortal = lazy(() => import('./pages/DoctorPortal'))
@@ -32,6 +107,14 @@ const ROLE_PATHS = {
   lab: '/lab',
   pharmacy: '/pharmacy',
   admin: '/admin',
+  hr: '/hr/journey-center/dashboard',
+  employee: '/employee/dashboard',
+}
+
+/** Legacy URLs — keep bookmarks working after renaming Offer Builder V2 → Offer Builder */
+function BuilderLegacyRedirect() {
+  const { builderId } = useParams()
+  return <Navigate to={builderId ? `/hr/builder/${builderId}` : '/hr/builder'} replace />
 }
 
 /** Pharmacy API requires X-Pharmacy-Branch; without it every request fails and must not auto-bounce from /login */
@@ -67,11 +150,7 @@ function PortalAccessRoute({ portalCode, children }) {
 }
 
 function PharmacyRequiresBranch({ children }) {
-  const role = useAuthStore((s) => s.role)
-  const pharmacyBranchId = useAuthStore((s) => s.pharmacyBranchId)
-  if (role === 'pharmacy' && !pharmacyBranchId) {
-    return <Navigate to="/login" replace />
-  }
+  // Branch is resolved inside PharmacyPortal before API calls (supports multi-portal access).
   return children
 }
 
@@ -119,8 +198,8 @@ const PORTAL_TITLE_PREFIX = {
 function AppHeadManager() {
   const location = useLocation()
   const [hospitalBrandingBump, setHospitalBrandingBump] = useState(0)
-  const manifestBlobUrlRef = useRef(null)
   const access = useAuthStore((s) => s.tokens.access)
+  const hospitalId = useAuthStore((s) => s.user?.hospital_id)
 
   useEffect(() => {
     const bump = () => setHospitalBrandingBump((n) => n + 1)
@@ -202,6 +281,13 @@ function AppHeadManager() {
     appendLink('icon', iconUrl, 'image/png')
     appendLink('shortcut icon', iconUrl, 'image/png')
     appendLink('apple-touch-icon', iconUrl)
+
+    const hospitalName = getHospitalNameForTab()
+    const appleTitleMeta = document.querySelector('meta[name="apple-mobile-web-app-title"]')
+    if (appleTitleMeta) {
+      appleTitleMeta.setAttribute('content', hospitalName)
+    }
+
     let manifestLink = document.querySelector('link[rel="manifest"]')
     if (!manifestLink) {
       manifestLink = document.createElement('link')
@@ -209,26 +295,11 @@ function AppHeadManager() {
       document.head.appendChild(manifestLink)
     }
 
-    if (manifestBlobUrlRef.current) {
-      URL.revokeObjectURL(manifestBlobUrlRef.current)
-      manifestBlobUrlRef.current = null
-    }
-    try {
-      const blobUrl = createManifestBlobUrl(roleKey, undefined, getHospitalBrandingProfile())
-      manifestBlobUrlRef.current = blobUrl
-      manifestLink.setAttribute('href', blobUrl)
-    } catch {
-      manifestLink.setAttribute('href', roleMeta.manifestFallback)
-    }
-
-    return () => {
-      const u = manifestBlobUrlRef.current
-      if (u) {
-        URL.revokeObjectURL(u)
-        manifestBlobUrlRef.current = null
-      }
-    }
-  }, [location.pathname, hospitalBrandingBump])
+    manifestLink.setAttribute(
+      'href',
+      hospitalId ? getPwaManifestUrl(roleKey, hospitalId) : roleMeta.manifestFallback,
+    )
+  }, [location.pathname, hospitalBrandingBump, hospitalId])
 
   return null
 }
@@ -316,10 +387,10 @@ export default function App() {
           <Route path="/change-password" element={<ChangePassword />} />
           <Route path="/staff" element={<PortalAccessRoute portalCode="staff"><StaffPortal /></PortalAccessRoute>} />
           <Route path="/doctor" element={<PortalAccessRoute portalCode="doctor"><DoctorPortal /></PortalAccessRoute>} />
-          <Route path="/receptionist" element={<PortalAccessRoute portalCode="receptionist"><ReceptionistPortal /></PortalAccessRoute>} />
+          <Route path="/receptionist/*" element={<PortalAccessRoute portalCode="receptionist"><ReceptionistPortal /></PortalAccessRoute>} />
           <Route path="/lab" element={<PortalAccessRoute portalCode="lab"><LabPortal /></PortalAccessRoute>} />
           <Route
-            path="/pharmacy"
+            path="/pharmacy/*"
             element={
               <PortalAccessRoute portalCode="pharmacy">
                 <PharmacyRequiresBranch>
@@ -336,8 +407,97 @@ export default function App() {
               </PortalAccessRoute>
             }
           />
+
+          <Route path="/employee/change-password" element={<EmployeeAuthRoute><EmployeeChangePasswordPage /></EmployeeAuthRoute>} />
+          <Route path="/employee" element={<EmployeeRoute><EmployeeShellLayout /></EmployeeRoute>}>
+            <Route path="dashboard" element={<EmployeeDashboardPage />} />
+            <Route path="attendance" element={<EmployeePortalAttendancePage />} />
+            <Route path="leaves" element={<EmployeeLeavesPage />} />
+            <Route path="profile" element={<EmployeeProfilePage />} />
+            <Route path="documents" element={<EmployeeDocumentsPage />} />
+            <Route path="notifications" element={<EmployeeNotificationsPage />} />
+            <Route path="holidays" element={<EmployeeHolidaysPage />} />
+            <Route path="payslips" element={<EmployeePayslipsPage />} />
+            <Route path="payslips/:id" element={<EmployeePayslipDetailPage />} />
+            <Route index element={<Navigate to="/employee/dashboard" replace />} />
+          </Route>
+          <Route path="/hr" element={<HRRoute><HRShellLayout /></HRRoute>}>
+            <Route index element={<HRHomeRedirect />} />
+            <Route path="journey-center" element={<JourneyCenterPage />} />
+            <Route path="journey-center/dashboard" element={<JourneyCenterDashboardPage />} />
+            <Route path="journey-center/setup-wizard" element={<Navigate to="/hr/settings/organization" replace />} />
+            <Route path="journey-center/intelligence" element={<Navigate to="/hr/journey-center" replace />} />
+            <Route path="reports" element={<HRReportsPlaceholderPage />} />
+            <Route path="recruitment/dashboard" element={<Navigate to="/hr/journey-center" replace />} />
+            <Route path="recruitment/jobs" element={<RecruitmentJobsPage />} />
+            <Route path="recruitment/candidates" element={<RecruitmentCandidatesPage />} />
+            <Route path="recruitment/interviews" element={<RecruitmentInterviewsPage />} />
+            <Route path="recruitment/offers" element={<RecruitmentOffersPage />} />
+            <Route path="recruitment/offer-settings" element={<Navigate to="/hr/settings/organization/details" replace />} />
+            <Route path="settings/organization" element={<OrganizationSettingsPage />} />
+            <Route path="settings/organization/details" element={<OrganizationDetailsPage />} />
+            <Route path="recruitment/job/:jobId/candidates" element={<JobCandidates />} />
+            <Route path="onboarding" element={<OnboardingLegacyRedirect />} />
+            <Route path="onboarding/document-verification" element={<OnboardingDocumentVerificationPage />} />
+            <Route path="onboarding/pending-documents" element={<OnboardingPendingDocumentsPage />} />
+            <Route path="onboarding/document-expiry" element={<Navigate to="/hr/onboarding/document-verification" replace />} />
+            <Route path="verification" element={<Navigate to="/hr/onboarding/document-verification" replace />} />
+            <Route path="checklist-rules" element={<ChecklistRules />} />
+            <Route path="employees/create" element={<ManualEmployeeCreatePage />} />
+            <Route path="designations" element={<DesignationsPage />} />
+            <Route path="employees" element={<EmployeeDirectoryPage />} />
+            <Route path="employees/inactive" element={<InactiveEmployeeDirectoryPage />} />
+            <Route path="employees/:id" element={<EmployeeDetail />} />
+            <Route path="employees/:id/edit" element={<EmployeeDetail />} />
+            <Route path="employees/:id/documents" element={<EmployeeDocuments />} />
+            <Route path="operations/departments" element={<OperationsDepartmentsPage />} />
+            <Route path="operations/attendance" element={<OperationsAttendancePage />} />
+            <Route path="operations/attendance/daily" element={<Navigate to="/hr/operations/attendance" replace />} />
+            <Route path="attendance/calendar" element={<AttendanceCalendarPage />} />
+            <Route path="attendance/generate-test" element={<GenerateTestAttendancePage />} />
+            <Route path="operations/attendance/calendar" element={<Navigate to="/hr/attendance/calendar" replace />} />
+            <Route path="employees/:id/attendance" element={<EmployeeAttendancePage />} />
+            <Route path="operations/shifts" element={<ShiftManagementPage />} />
+            <Route path="operations/shifts/new" element={<ShiftFormPage />} />
+            <Route path="operations/shifts/:shiftId/edit" element={<ShiftFormPage />} />
+            <Route path="operations/punch-logs" element={<PunchLogsPage />} />
+            <Route path="operations/biometric-conflicts" element={<BiometricUnlinkedUsersPage />} />
+            <Route path="operations/biometric-rejected-punches" element={<BiometricRejectedPunchesPage />} />
+            <Route path="attendance-control" element={<AttendanceControlPage />} />
+            <Route path="operations/regularizations" element={<RegularizationRequestsPage />} />
+            <Route path="operations/holidays" element={<HolidayManagementPage />} />
+            <Route path="leave/types" element={<LeaveTypesPage />} />
+            <Route path="leave/policies/new" element={<LeavePolicyFormPage />} />
+            <Route path="leave/policies" element={<LeavePoliciesPage />} />
+            <Route path="leave/balances" element={<LeaveBalancesPage />} />
+            <Route path="leave/requests" element={<LeaveRequestsPage />} />
+            <Route path="operations/leave" element={<Navigate to="/hr/leave/requests" replace />} />
+            <Route path="operations/salary" element={<OperationsSalaryPage />} />
+            <Route path="payroll/compensation-levels" element={<CompensationLevelsPage />} />
+            <Route path="payroll/compensation-levels/new" element={<CompensationLevelFormPage />} />
+            <Route path="payroll/department-structures" element={<Navigate to="/hr/payroll/compensation-levels" replace />} />
+            <Route path="payroll/structures" element={<SalaryStructuresPage />} />
+            <Route path="payroll/assign" element={<AssignSalaryStructurePage />} />
+            <Route path="payroll/assign/:employeeId" element={<AssignSalaryStructurePage />} />
+            <Route path="payroll/runs" element={<PayrollRunsPage />} />
+            <Route path="payroll/runs/:id" element={<PayrollRunDetailPage />} />
+            <Route path="payroll/payslips" element={<PayrollPayslipsPage />} />
+            <Route path="payroll/settings" element={<Navigate to="/hr/payroll/compensation-levels" replace />} />
+            <Route path="operations/performance" element={<OperationsPerformancePage />} />
+            <Route path="jobs/new" element={<JobForm />} />
+            <Route path="jobs/:jobId/edit" element={<JobForm />} />
+            <Route path="departments/new" element={<DepartmentForm />} />
+            <Route path="candidates/:candidateId" element={<CandidateDetail />} />
+            <Route path="offer-templates" element={<Navigate to="/hr/builder" replace />} />
+            <Route path="builder" element={USE_NEW_OFFER_BUILDER ? <OfferLetterBuilderV2 /> : <OfferTemplateBuilder />} />
+            <Route path="builder/:builderId" element={USE_NEW_OFFER_BUILDER ? <OfferLetterBuilderV2 /> : <OfferTemplateBuilder />} />
+            <Route path="builder-v2" element={<BuilderLegacyRedirect />} />
+            <Route path="builder-v2/:builderId" element={<BuilderLegacyRedirect />} />
+            <Route path="offer-drafts" element={<OfferDrafts />} />
+          </Route>
+          <Route path="/offer/onboarding/:token" element={<DocumentUpload />} />
           <Route path="/tv/:roomCode" element={<TVDisplay />} />
-          <Route path="/print-slip" element={<PrintSlipPage />} />
+          <Route path="/print-slip" element={<AuthenticatedRoute><PrintSlipPage /></AuthenticatedRoute>} />
           <Route path="/pharmacy-display" element={<PharmacySalesDisplay />} />
           <Route path="/" element={<HomeRedirect />} />
         </Routes>

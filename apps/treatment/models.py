@@ -211,6 +211,7 @@ class PatientTimeline(TimeStampedModel, UUIDPrimaryKeyModel):
         PLAN_SAVED = "plan_saved", "Treatment Plan Saved"
         TREATMENT_DONE = "treatment_done", "Treatment Done"
         TREATMENT_SKIPPED = "treatment_skipped", "Treatment Skipped"
+        PROCESS_LOG_SAVED = "process_log_saved", "IPD Process Log Saved"
 
     hospital = models.ForeignKey(Hospital, on_delete=models.PROTECT, related_name="patient_timeline_events")
     patient = models.ForeignKey(Patient, on_delete=models.CASCADE, related_name="treatment_timeline_events")
@@ -243,6 +244,13 @@ class PatientTimeline(TimeStampedModel, UUIDPrimaryKeyModel):
     )
     treatment_task = models.ForeignKey(
         "TreatmentTask",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="timeline_events",
+    )
+    ipd_process_log = models.ForeignKey(
+        "ipd.IPDDailyProcessLog",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

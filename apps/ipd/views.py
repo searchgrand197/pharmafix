@@ -2,24 +2,26 @@ from __future__ import annotations
 from decimal import Decimal
 from collections import defaultdict
 
-from datetime import datetime
+from datetime import datetime, time as dtime
 
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
-from django.utils.dateparse import parse_datetime
+from django.utils.dateparse import parse_datetime, parse_date
 from rest_framework.exceptions import ValidationError
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.filters import SearchFilter
 from rest_framework.response import Response
 
-from apps.ipd.models import IPDAdmission, IPDAdmissionStatusHistory, IPDTransferHistory
-from apps.ipd.serializers import IPDAdmissionCreateUpdateSerializer, IPDAdmissionSerializer
+from apps.ipd.models import IPDAdmission, IPDAdmissionStatusHistory, IPDTransferHistory, IPDDailyProcessLog
+from apps.ipd.serializers import IPDAdmissionCreateUpdateSerializer, IPDAdmissionSerializer, IPDDailyProcessLogSerializer
+from apps.ipd.process_log_service import resolve_process_config_for_save, save_ipd_process_log
 from apps.ipd.services import ipd_calendar_stay_days, ipd_stay_days
 from apps.opd.models import OPDVisit
 from apps.beds.models import Bed
-from apps.billing.models import BillingInvoice, InvoiceItem, InvoiceNumberSequence
+from apps.billing.final_bill_utils import next_ipd_final_bill_number
+from apps.billing.models import BillingInvoice, IPDFinalBill, InvoiceItem, InvoiceNumberSequence
 from apps.payments.models import PaymentTransaction
 from apps.payments.serializers import PaymentTransactionSerializer
 from apps.roles_permissions.permissions import HasRequiredPermission
@@ -65,6 +67,37 @@ def _parse_paid_at_from_request(request, default=None):
     if timezone.is_naive(parsed):
         parsed = timezone.make_aware(parsed, timezone.get_current_timezone())
     return parsed
+
+
+def _ipd_final_bill_patient_snapshot(patient):
+    patient_name = " ".join(
+        part for part in [getattr(patient, "first_name", ""), getattr(patient, "middle_name", ""), getattr(patient, "last_name", "")]
+        if part
+    ).strip()
+    guardian_name = getattr(getattr(patient, "guardian", None), "name", "") or ""
+    address_obj = getattr(patient, "address", None)
+    patient_address = ""
+    if address_obj is not None:
+        patient_address = ", ".join(
+            part.strip()
+            for part in [
+                getattr(address_obj, "line1", ""),
+                getattr(address_obj, "line2", ""),
+                getattr(address_obj, "city", ""),
+                getattr(address_obj, "state", ""),
+                getattr(address_obj, "postal_code", ""),
+            ]
+            if str(part).strip()
+        )
+    return patient_name, guardian_name, patient_address
+
+
+def _ipd_doctor_display_name(user):
+    if not user:
+        return ""
+    fn = (getattr(user, "first_name", "") or "").strip()
+    ln = (getattr(user, "last_name", "") or "").strip()
+    return f"{fn} {ln}".strip() or getattr(user, "email", "") or str(user.pk)
 
 
 def _stamp_new_invoice_ledger_times(invoice, paid_at):
@@ -248,6 +281,8 @@ class IPDAdmissionViewSet(viewsets.ModelViewSet):
         "partial_update": "ipd.update_admission",
         "destroy": "ipd.delete_admission",
         "convert_from_opd": "ipd.create_admission",
+        "process_logs": "ipd.view_admission",
+        "update_process_log": "ipd.update_admission",
     }
 
     def get_serializer_class(self):
@@ -256,7 +291,10 @@ class IPDAdmissionViewSet(viewsets.ModelViewSet):
         return IPDAdmissionCreateUpdateSerializer
 
     def get_required_permission(self) -> str | None:
-        return self.required_permission_map.get(getattr(self, "action", None))
+        action = getattr(self, "action", None)
+        if action == "process_logs" and getattr(self.request, "method", "").upper() == "POST":
+            return "ipd.update_admission"
+        return self.required_permission_map.get(action)
 
     def get_permissions(self):
         self.required_permission = self.get_required_permission()
@@ -276,6 +314,7 @@ class IPDAdmissionViewSet(viewsets.ModelViewSet):
             wanted = [s.strip() for s in status_q.split(",") if s.strip() in allowed]
             if wanted:
                 scoped = scoped.filter(status__in=wanted)
+        scoped = scoped.select_related("final_bill", "patient", "patient__guardian", "assigned_doctor", "scheme")
         return scoped
 
     @transaction.atomic
@@ -330,6 +369,24 @@ class IPDAdmissionViewSet(viewsets.ModelViewSet):
             action="create_admission",
             obj=admission,
             after={"patient_uhid": admission.patient.uhid, "status": admission.status},
+        )
+
+        patient_name, guardian_name, patient_address = _ipd_final_bill_patient_snapshot(admission.patient)
+        IPDFinalBill.objects.get_or_create(
+            admission=admission,
+            defaults={
+                "hospital_id": hospital_id,
+                "patient": admission.patient,
+                "bill_no": next_ipd_final_bill_number(admission),
+                "patient_name": patient_name,
+                "guardian_name": guardian_name,
+                "patient_phone": admission.patient.phone or "",
+                "patient_address": patient_address,
+                "consultant_name": _ipd_doctor_display_name(admission.assigned_doctor),
+                "room_bed": admission.bed_code or "",
+                "scheme_name": getattr(getattr(admission, "scheme", None), "name", "") or "",
+                "admission_date": timezone.make_aware(datetime.combine(admission.admission_date, dtime.min)),
+            },
         )
 
     @transaction.atomic
@@ -424,6 +481,7 @@ class IPDAdmissionViewSet(viewsets.ModelViewSet):
             "patient": opd_visit.patient_id,
             "opd_visit": opd_visit.id,
             "admission_date": timezone.now().date(),
+            "admission_time": timezone.localtime().time().replace(microsecond=0),
             "expected_discharge_date": request.data.get("expected_discharge_date"),
             "assigned_doctor": request.data.get("assigned_doctor"),
             "assigned_nurse": request.data.get("assigned_nurse"),
@@ -1528,3 +1586,83 @@ class IPDAdmissionViewSet(viewsets.ModelViewSet):
             "unit_price": str(item.unit_price),
             "new_total": str(invoice.total_amount)
         })
+
+    @action(detail=True, methods=["get", "post"], url_path="process-logs")
+    @transaction.atomic
+    def process_logs(self, request, pk=None):
+        admission = self.get_object()
+        if request.method == "GET":
+            logs = (
+                IPDDailyProcessLog.objects.filter(admission=admission)
+                .select_related("recorded_by")
+                .order_by("-log_date", "-created_at")
+            )
+            return success_response(data=IPDDailyProcessLogSerializer(logs, many=True).data)
+
+        raw_date = request.data.get("log_date")
+        log_date = parse_date(str(raw_date).strip()) if raw_date else None
+        if not log_date:
+            return Response({"errors": {"log_date": ["Valid log_date (YYYY-MM-DD) is required."]}}, status=400)
+        existing = IPDDailyProcessLog.objects.filter(admission=admission, log_date=log_date).first()
+        template_id, process_config = resolve_process_config_for_save(
+            hospital_id=admission.hospital_id,
+            process_template_id=request.data.get("process_template_id"),
+            existing=existing,
+        )
+        serializer = IPDDailyProcessLogSerializer(
+            instance=existing,
+            data=request.data,
+            partial=bool(existing),
+            context={"admission": admission, "process_config": process_config},
+        )
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+        log = save_ipd_process_log(
+            admission=admission,
+            log_date=log_date,
+            data=validated,
+            user=request.user,
+            existing=existing,
+            process_template_id=template_id,
+            process_config=process_config,
+        )
+        return success_response(
+            data=IPDDailyProcessLogSerializer(log).data,
+            status_code=status.HTTP_200_OK if existing else status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["patch"], url_path=r"process-logs/(?P<log_id>[^/.]+)")
+    @transaction.atomic
+    def update_process_log(self, request, pk=None, log_id=None):
+        admission = self.get_object()
+        log = IPDDailyProcessLog.objects.filter(admission=admission, pk=log_id).first()
+        if not log:
+            return Response({"errors": {"log_id": ["Process log not found."]}}, status=404)
+        template_id, process_config = resolve_process_config_for_save(
+            hospital_id=admission.hospital_id,
+            process_template_id=request.data.get("process_template_id") or log.process_template_id,
+            existing=log,
+        )
+        serializer = IPDDailyProcessLogSerializer(
+            log,
+            data=request.data,
+            partial=True,
+            context={
+                "admission": admission,
+                "process_config": process_config,
+            },
+        )
+        serializer.is_valid(raise_exception=True)
+        validated = serializer.validated_data
+        log_date = validated.get("log_date", log.log_date)
+        log = save_ipd_process_log(
+            admission=admission,
+            log_date=log_date,
+            data={**validated, "log_date": log_date},
+            user=request.user,
+            existing=log,
+            process_template_id=template_id,
+            process_config=process_config,
+        )
+        return success_response(data=IPDDailyProcessLogSerializer(log).data)
+

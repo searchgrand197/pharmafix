@@ -12,6 +12,9 @@ import { useDischargeFieldCatalog } from '../components/discharge/useDischargeFi
 import { rxItemsToMedicationRows, medicationRowsToRxItems } from '../pharmacy/rxMedicationMapping'
 import { useDebouncedValue } from '../pharmacy/useDebouncedValue'
 import { pickDefaultPharmacyBranchId } from '../pharmacy/rxConstants'
+import { filterCommonSalts, isCommonSaltName, MEDICINE_DB_LOWER, normalizeSaltName } from '../pharmacy/commonSaltNames'
+import { getRxPrintDefaultsFromLayout } from '../pharmacy/rxBoxDefaults'
+import { printRxOnly, loadOpdSlipLayoutForPrint } from '../utils/printOpdSheet'
 import { formatTime, useTimeDisplayMode } from '../utils/dateTimeFormat'
 import { format, addDays } from 'date-fns'
 import {
@@ -492,30 +495,7 @@ function MicrophoneInput({ onTranscript, autoStart = false }) {
 }
 
 // ─── AI Medical Extractor ───────────────────────────────────────────────────────
-const MEDICINE_DB = [
-  // Antibiotics
-  'amoxicillin','augmentin','azithromycin','ciprofloxacin','ceftriaxone','metronidazole','doxycycline','clindamycin','ampicillin','trimethoprim','cephalexin','erythromycin','nitrofurantoin','vancomycin','levofloxacin',
-  // Pain / Anti-inflammatory
-  'paracetamol','ibuprofen','diclofenac','naproxen','aspirin','ketorolac','tramadol','morphine','codeine','mefenamic','celecoxib','piroxicam',
-  // Antacids / GI
-  'omeprazole','pantoprazole','ranitidine','famotidine','metoclopramide','domperidone','ondansetron','sucralfate','lactulose','bisacodyl',
-  // Cardiac
-  'amlodipine','atenolol','metoprolol','losartan','ramipril','enalapril','digoxin','furosemide','spironolactone','nitroglycerin','clopidogrel','warfarin','heparin',
-  // Diabetes
-  'metformin','glibenclamide','glipizide','insulin','sitagliptin','empagliflozin','dapagliflozin','pioglitazone',
-  // Respiratory
-  'salbutamol','budesonide','fluticasone','montelukast','theophylline','ipratropium','tiotropium','salmeterol',
-  // Vitamins / Supplements
-  'vitamin','calcium','zinc','folic','iron','b12','b6','d3','magnesium','potassium','multivitamin',
-  // Steroids
-  'prednisolone','dexamethasone','hydrocortisone','methylprednisolone','betamethasone',
-  // Neuro / Psych
-  'diazepam','lorazepam','alprazolam','phenobarbitone','phenytoin','levetiracetam','gabapentin','pregabalin','amitriptyline','sertraline','fluoxetine','haloperidol',
-  // Common brand names / combos
-  'panadol','crocin','combiflam','mucaine','pan','pantop','volix','glucophage','calpol','zithromax','augpen','taxim','taxim-o','rifagut',
-  // IV fluids
-  'normal saline','ringer lactate','dextrose','dns','rl','ns','glucose','iv fluid','iv fluids',
-];
+const MEDICINE_DB = MEDICINE_DB_LOWER
 
 function extractMedAndFollowup(text) {
   if (!text || text.trim().length < 3) return { meds: [], followupDays: null };
@@ -915,6 +895,18 @@ function AITransitionOverlay({ onDone }) {
 }
 
 
+function newRxItemKey() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
+  return `rx-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+}
+
+function mergeCustomSalts(prev, row) {
+  if (!row?.name) return prev
+  const norm = normalizeSaltName(row.name)
+  const without = (prev || []).filter((s) => normalizeSaltName(s.name) !== norm)
+  return [row, ...without]
+}
+
 // ─── Inline Rx Panel (embedded prescription, no modal) ───────────────────────
 function InlineRxPanel({
   visit,
@@ -926,6 +918,9 @@ function InlineRxPanel({
   const [open, setOpen] = useState(true)
   const [branches, setBranches] = useState([])
   const [branchId, setBranchId] = useState('')
+  const [manualSaltMode, setManualSaltMode] = useState(false)
+  const [customSalts, setCustomSalts] = useState([])
+  const [saltResults, setSaltResults] = useState([])
   const [search, setSearch] = useState('')
   const [results, setResults] = useState([])
   const [searching, setSearching] = useState(false)
@@ -941,9 +936,24 @@ function InlineRxPanel({
       setBranches(list)
       if (list.length) setBranchId(pickDefaultPharmacyBranchId(list))
     }).catch(() => {})
+  }, [open, branches.length])
+
+  useEffect(() => {
+    if (!open) return
+    api.get('/doctors/custom-rx-salts/')
+      .then(r => setCustomSalts(Array.isArray(r.data?.data) ? r.data.data : []))
+      .catch(() => {})
   }, [open])
 
   useEffect(() => {
+    if (branches.length === 0 && !manualSaltMode) setManualSaltMode(true)
+  }, [branches.length, manualSaltMode])
+
+  useEffect(() => {
+    if (manualSaltMode) {
+      setResults([])
+      return
+    }
     if (!branchId || debouncedQ.length < 1) { setResults([]); return }
     setSearching(true)
     api.get('/pharmacy/doctor-stock-search/', { params: { pharmacy_id: branchId, q: debouncedQ } })
@@ -966,7 +976,26 @@ function InlineRxPanel({
       })
       .catch(() => setResults([]))
       .finally(() => setSearching(false))
-  }, [debouncedQ, branchId])
+  }, [debouncedQ, branchId, manualSaltMode])
+
+  useEffect(() => {
+    if (!manualSaltMode) {
+      setSaltResults([])
+      return
+    }
+    const extra = customSalts.map(s => s.name)
+    setSaltResults(filterCommonSalts(debouncedQ, extra))
+  }, [debouncedQ, manualSaltMode, customSalts])
+
+  const rememberCustomSalt = async (name) => {
+    const trimmed = String(name || '').trim()
+    if (trimmed.length < 2 || isCommonSaltName(trimmed)) return
+    try {
+      const { data } = await api.post('/doctors/custom-rx-salts/', { name: trimmed })
+      const row = data?.data
+      if (row) setCustomSalts(prev => mergeCustomSalts(prev, row))
+    } catch { /* don't block prescribing */ }
+  }
 
   const calculateQty = (pattern, days) => {
     const matched = dosagePatternOptions.find((p) => String(p.v) === String(pattern))
@@ -982,12 +1011,56 @@ function InlineRxPanel({
     setItems(p => p.map(it => ({ ...it, days: d, qty: calculateQty(it.pattern || dosagePatternOptions[0]?.v || '1-0-1', d) })))
   }
 
-  const addItem = pick => {
-    if (items.some(i => String(i.batch.id) === String(pick.batch.id))) return toast.error('Already added')
+  const toggleManualSaltMode = () => {
+    setManualSaltMode(m => !m)
+    setSearch('')
+    setResults([])
+    setSaltResults([])
+    searchRef.current?.focus()
+  }
+
+  const addStockItem = pick => {
+    if (items.some(i => i.source !== 'manual' && String(i.batch?.id) === String(pick.batch?.id))) {
+      return toast.error('Already added')
+    }
     const defaultPattern = dosagePatternOptions[0]?.v || '1-0-1'
     const defaultTiming = timingOptions[0]?.v || 'AF'
-    setItems(p => [...p, { ...pick, pattern: defaultPattern, qty: calculateQty(defaultPattern, globalDays), days: globalDays, timing: defaultTiming }])
-    setSearch(''); setResults([]); searchRef.current?.focus()
+    setItems(p => [...p, {
+      key: newRxItemKey(),
+      source: 'stock',
+      ...pick,
+      pattern: defaultPattern,
+      qty: calculateQty(defaultPattern, globalDays),
+      days: globalDays,
+      timing: defaultTiming,
+    }])
+    setSearch('')
+    setResults([])
+    searchRef.current?.focus()
+  }
+
+  const addManualItem = (name) => {
+    const trimmed = String(name || '').trim()
+    if (trimmed.length < 2) return toast.error('Enter at least 2 characters')
+    const norm = normalizeSaltName(trimmed)
+    if (items.some(i => i.source === 'manual' && normalizeSaltName(i.manualName) === norm)) {
+      return toast.error('Already added')
+    }
+    const defaultPattern = dosagePatternOptions[0]?.v || '1-0-1'
+    const defaultTiming = timingOptions[0]?.v || 'AF'
+    setItems(p => [...p, {
+      key: newRxItemKey(),
+      source: 'manual',
+      manualName: trimmed,
+      pattern: defaultPattern,
+      qty: calculateQty(defaultPattern, globalDays),
+      days: globalDays,
+      timing: defaultTiming,
+    }])
+    rememberCustomSalt(trimmed)
+    setSearch('')
+    setSaltResults([])
+    searchRef.current?.focus()
   }
 
   const upd = (idx, f, v) => setItems(p => p.map((it, i) => {
@@ -998,7 +1071,17 @@ function InlineRxPanel({
     }
     return updated
   }))
+
+  const handleManualNameBlur = (idx, name) => {
+    const trimmed = String(name || '').trim()
+    if (trimmed.length >= 2) rememberCustomSalt(trimmed)
+  }
+
   const rem = idx => setItems(p => p.filter((_, i) => i !== idx))
+
+  const searchTrimmed = String(search || '').trim()
+  const showAddCustomRow = manualSaltMode && searchTrimmed.length >= 2 && saltResults.length === 0
+    && !items.some(i => i.source === 'manual' && normalizeSaltName(i.manualName) === normalizeSaltName(searchTrimmed))
 
   useEffect(() => {
     if (!onDraftChange) return
@@ -1027,14 +1110,25 @@ function InlineRxPanel({
 
       {open && (
         <div className="bg-white">
-          {/* Branch selector */}
-          {branches.length > 1 && (
-            <div className="px-3 py-1.5 border-b border-slate-100 flex items-center gap-2">
-              <span className="text-[10px] font-bold text-slate-500 uppercase">Branch:</span>
-              <select value={branchId} onChange={e => { setBranchId(e.target.value); setItems([]) }}
-                className="text-[11px] border border-slate-200 rounded px-2 py-0.5 outline-none flex-1">
-                {branches.map(b => <option key={b.id} value={b.id}>{b.label || b.name}</option>)}
-              </select>
+          {(branches.length >= 1 || branches.length === 0) && (
+            <div className="px-3 py-1.5 border-b border-slate-100 flex items-center gap-2 flex-wrap">
+              {branches.length >= 1 && (
+                <>
+                  <span className="text-[10px] font-bold text-slate-500 uppercase shrink-0">Branch:</span>
+                  <select value={branchId} onChange={e => { setBranchId(e.target.value); setResults([]) }}
+                    className="text-[11px] border border-slate-200 rounded px-2 py-0.5 outline-none w-36 sm:w-44 max-w-[50%] shrink-0">
+                    {branches.map(b => <option key={b.id} value={b.id}>{b.label || b.name}</option>)}
+                  </select>
+                </>
+              )}
+              <button type="button" onClick={toggleManualSaltMode}
+                className={`ml-auto shrink-0 px-3 h-7 rounded-lg text-[10px] font-black border whitespace-nowrap transition-colors ${
+                  manualSaltMode
+                    ? 'bg-amber-200 border-amber-400 text-amber-950 ring-2 ring-amber-300/60'
+                    : 'bg-amber-50 border-amber-200 text-amber-900 hover:bg-amber-100'
+                }`}>
+                + Not in pharma
+              </button>
             </div>
           )}
 
@@ -1058,19 +1152,20 @@ function InlineRxPanel({
             <div className="relative">
               <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
               <input ref={searchRef} value={search} onChange={e => setSearch(e.target.value)}
-                placeholder="Search medicine..." autoFocus
+                placeholder={manualSaltMode ? 'Search common salts (Paracetamol, Amoxicillin...)' : 'Search medicine...'}
+                autoFocus
                 className="w-full h-8 pl-8 pr-3 text-[12px] border border-slate-200 rounded-lg outline-none focus:border-emerald-400 focus:ring-1 focus:ring-emerald-400/30" />
-              {searching && <Loader2 size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-emerald-500 animate-spin" />}
+              {searching && !manualSaltMode && <Loader2 size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-emerald-500 animate-spin" />}
             </div>
           </div>
 
-          {/* Search results */}
-          {results.length > 0 && (
+          {/* Stock search results */}
+          {!manualSaltMode && results.length > 0 && (
             <div className="mx-3 mb-2 border border-slate-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto">
               {results.slice(0, 8).map((pick, i) => {
-                const added = items.some(it => String(it.batch.id) === String(pick.batch.id))
+                const added = items.some(it => it.source !== 'manual' && String(it.batch?.id) === String(pick.batch?.id))
                 return (
-                  <button key={i} onClick={() => !added && addItem(pick)} disabled={added}
+                  <button key={i} onClick={() => !added && addStockItem(pick)} disabled={added}
                     className={`w-full text-left flex items-center gap-2 px-2.5 py-1.5 transition-colors border-b border-slate-100 last:border-0 ${
                       added ? 'opacity-40 cursor-default bg-slate-50' : 'hover:bg-emerald-50'
                     }`}>
@@ -1092,6 +1187,32 @@ function InlineRxPanel({
             </div>
           )}
 
+          {/* Manual salt search results */}
+          {manualSaltMode && (saltResults.length > 0 || showAddCustomRow) && (
+            <div className="mx-3 mb-2 border border-amber-200 rounded-lg overflow-hidden max-h-40 overflow-y-auto bg-amber-50/30">
+              {saltResults.map((name, i) => {
+                const added = items.some(it => it.source === 'manual' && normalizeSaltName(it.manualName) === normalizeSaltName(name))
+                return (
+                  <button key={`salt-${i}`} type="button" onClick={() => !added && addManualItem(name)} disabled={added}
+                    className={`w-full text-left flex items-center gap-2 px-2.5 py-1.5 transition-colors border-b border-amber-100 last:border-0 ${
+                      added ? 'opacity-40 cursor-default bg-slate-50' : 'hover:bg-amber-50'
+                    }`}>
+                    <Pill size={11} className="text-amber-700 shrink-0" />
+                    <span className="text-[11px] font-bold text-slate-900 truncate flex-1">{name}</span>
+                    {added ? <CheckCircle size={11} className="text-amber-500" /> : <Plus size={11} className="text-amber-600" />}
+                  </button>
+                )
+              })}
+              {showAddCustomRow && (
+                <button type="button" onClick={() => addManualItem(searchTrimmed)}
+                  className="w-full text-left flex items-center gap-2 px-2.5 py-2 bg-amber-100 hover:bg-amber-200 transition-colors border-t border-amber-200">
+                  <Plus size={11} className="text-amber-800 shrink-0" />
+                  <span className="text-[11px] font-black text-amber-950">Add &quot;{searchTrimmed}&quot; as medicine</span>
+                </button>
+              )}
+            </div>
+          )}
+
           {/* Added items */}
           {items.length > 0 && (
             <div className="px-3 pb-2 space-y-1.5 mt-1">
@@ -1101,9 +1222,21 @@ function InlineRxPanel({
               </div>
               <div className="max-h-56 overflow-y-auto pr-1 space-y-1">
                 {items.map((item, idx) => (
-                  <div key={idx} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 shadow-sm flex items-center gap-1.5 min-w-0">
-                    <Pill size={12} className="text-emerald-500 shrink-0" />
-                    <p className="w-40 text-[10px] font-bold text-slate-900 truncate" title={item.medicine.name}>{item.medicine.name}</p>
+                  <div key={item.key || idx} className="bg-white border border-slate-200 rounded-lg px-2 py-1.5 shadow-sm flex items-center gap-1.5 min-w-0">
+                    {item.source === 'manual' ? (
+                      <>
+                        <span className="text-[9px] font-black text-amber-700 uppercase shrink-0">Manual</span>
+                        <input value={item.manualName || ''} onChange={e => upd(idx, 'manualName', e.target.value)}
+                          onBlur={e => handleManualNameBlur(idx, e.target.value)}
+                          placeholder="Medicine name"
+                          className="w-32 sm:w-36 text-[10px] font-bold border border-amber-200 rounded px-1.5 h-6 bg-amber-50/50 outline-none focus:border-amber-400 shrink-0 min-w-0" />
+                      </>
+                    ) : (
+                      <>
+                        <Pill size={12} className="text-emerald-500 shrink-0" />
+                        <p className="w-32 sm:w-40 text-[10px] font-bold text-slate-900 truncate" title={item.medicine?.name}>{item.medicine?.name}</p>
+                      </>
+                    )}
 
                     <select value={item.pattern} onChange={e => upd(idx, 'pattern', e.target.value)} title="Dosage Pattern"
                       className="w-[58px] h-6 text-[9px] font-bold text-center border border-slate-200 rounded bg-white outline-none cursor-pointer focus:border-emerald-400 transition-colors shrink-0">
@@ -1129,7 +1262,9 @@ function InlineRxPanel({
               </div>
 
               <p className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1">
-                Medicine draft will be sent automatically when you click Mark Done.
+                {items.some(i => i.source === 'manual')
+                  ? 'Stock medicines go to pharmacy draft on Mark Done. Manual (not in pharma) lines are noted in remarks.'
+                  : 'Medicine draft will be sent automatically when you click Mark Done.'}
               </p>
             </div>
           )}
@@ -1137,7 +1272,7 @@ function InlineRxPanel({
           {!items.length && search.length < 1 && (
             <div className="py-4 text-center text-slate-400 text-[11px]">
               <Pill size={22} className="mx-auto mb-1 opacity-30" />
-              Search and add medicines above
+              {manualSaltMode ? 'Search common salts or add a custom medicine name' : 'Search and add medicines above'}
             </div>
           )}
         </div>
@@ -1341,6 +1476,7 @@ function OPDTab({ aiMode = false }) {
   const [rxDayOptions, setRxDayOptions] = useState(DEFAULT_RX_DAYS)
   const [dosagePatternOptions, setDosagePatternOptions] = useState(DEFAULT_DOSAGE_PATTERNS)
   const [timingOptions, setTimingOptions] = useState(DEFAULT_TIMING_OPTIONS)
+  const slipLayoutRef = useRef(null)
 
   const pushHistoryEvent = ({ visitId, category, text, ts = new Date().toISOString() }) => {
     if (!visitId || !category || !text) return
@@ -1440,6 +1576,17 @@ function OPDTab({ aiMode = false }) {
   };
 
   useEffect(() => {
+    let alive = true
+    loadOpdSlipLayoutForPrint()
+      .then((layout) => {
+        if (!alive || !layout) return
+        slipLayoutRef.current = layout
+      })
+      .catch(() => {})
+    return () => { alive = false }
+  }, [])
+
+  useEffect(() => {
     fetchVisits()
     pollingRef.current = setInterval(fetchVisits, 15000)
     return () => clearInterval(pollingRef.current)
@@ -1504,43 +1651,123 @@ function OPDTab({ aiMode = false }) {
   async function autoSendDraftForVisit(visit) {
     const draft = rxDraftByVisit[visit.id]
     const draftItems = Array.isArray(draft?.items) ? draft.items : []
-    const final = draftItems.map(i => ({ ...i, qty: Number(i.qty) || 0 })).filter(i => i.qty > 0)
+    const final = draftItems
+      .map(i => ({ ...i, qty: Number(i.qty) || 0 }))
+      .filter(i => {
+        if (i.qty <= 0) return false
+        if (i.source === 'manual') return String(i.manualName || '').trim().length >= 2
+        return Boolean(i.medicine?.id && i.batch?.id)
+      })
     if (!final.length) return false
+
+    const stockItems = final.filter(i => i.source !== 'manual' && i.medicine?.id && i.batch?.id)
+    const manualItems = final.filter(i => i.source === 'manual')
+
     const branchId = draft?.branchId
-    if (!branchId) throw new Error('Select pharmacy branch before marking done.')
-    const bn = draft?.branchLabel || branchId
+    if (stockItems.length > 0 && !branchId) {
+      throw new Error('Select pharmacy branch before marking done.')
+    }
+
+    const bn = draft?.branchLabel || branchId || 'N/A'
     const notes = Array.isArray(visit?.patient_notes) ? visit.patient_notes : []
     const notesBlock = notes.length
       ? `\n\nNotes/Advice:\n${notes.map((n) => `- ${String(n).trim()}`).filter((x) => x !== '- ').join('\n')}`
       : ''
-    const remarks = `Doctor Prescription (Branch: ${bn}):\n` +
-      final.map(i => `${i.medicine.name} x${i.qty} (${i.pattern}) | ${timingOptions.find(t => t.v === i.timing)?.l || i.timing} | ${i.days} day${i.days > 1 ? 's' : ''}`).join('\n') +
+
+    const stockLines = stockItems.map(i => {
+      const tl = timingOptions.find(t => t.v === i.timing)?.l || i.timing
+      return `${i.medicine.name} x${i.qty} (${i.pattern}) | ${tl} | ${i.days} day${i.days > 1 ? 's' : ''}`
+    })
+    const manualLines = manualItems.map(i => {
+      const name = String(i.manualName || '').trim()
+      const tl = timingOptions.find(t => t.v === i.timing)?.l || i.timing
+      return `${name} x${i.qty} (${i.pattern}) | ${tl} | ${i.days} day${i.days > 1 ? 's' : ''} [not in pharmacy]`
+    })
+    const allLines = [...stockLines, ...manualLines]
+    const remarks = (stockItems.length > 0
+      ? `Doctor Prescription (Branch: ${bn}):\n`
+      : 'Doctor Prescription (manual / not in pharmacy):\n') +
+      allLines.join('\n') +
       notesBlock
-    await api.post('/pharmacy/invoices/create-draft/', {
-      patient: visit.patient,
-      ipd_admission: visit.ipd_admission || null,
-      remarks,
-      items: final.map(it => ({
-        medicine: it.medicine.id, batch: it.batch.id, qty: it.qty,
-        mrp: it.batch.mrp, rate: it.batch.sale_rate,
-        amount: (Number(it.qty) * Number(it.batch.sale_rate)).toFixed(2),
-      })),
-    }, { headers: { 'X-Pharmacy-Branch': branchId } })
+
+    if (stockItems.length > 0) {
+      await api.post('/pharmacy/invoices/create-draft/', {
+        patient: visit.patient,
+        ipd_admission: visit.ipd_admission || null,
+        remarks,
+        items: stockItems.map(it => ({
+          medicine: it.medicine.id, batch: it.batch.id, qty: it.qty,
+          mrp: it.batch.mrp, rate: it.batch.sale_rate,
+          amount: (Number(it.qty) * Number(it.batch.sale_rate)).toFixed(2),
+        })),
+      }, { headers: { 'X-Pharmacy-Branch': branchId } })
+    }
+
     setRxDraftByVisit((prev) => {
       const next = { ...prev }
       delete next[visit.id]
       return next
     })
-    return true
+    return stockItems.length > 0 ? 'draft' : (manualItems.length > 0 ? 'manual' : false)
+  }
+
+  async function autoPrintVisitSlip(visit) {
+    let layout = slipLayoutRef.current
+    if (!layout) {
+      layout = await loadOpdSlipLayoutForPrint()
+      slipLayoutRef.current = layout
+    }
+    if (!layout?.rx_box) return
+
+    const selections = getRxPrintDefaultsFromLayout(layout)
+    const timingLabel = (v) => timingOptions.find(t => t.v === v)?.l || v
+    const draft = rxDraftByVisit[visit.id] || {}
+    const draftItems = Array.isArray(draft.items) ? draft.items : []
+
+    const rxPrintData = {
+      rxItems: selections.showRx
+        ? draftItems
+          .map(it => ({
+            name: it.source === 'manual' ? String(it.manualName || '').trim() : String(it.medicine?.name || ''),
+            isManual: it.source === 'manual',
+            pattern: it.pattern,
+            days: it.days,
+            qty: it.qty,
+            timing: timingLabel(it.timing),
+          }))
+          .filter(it => it.name.length > 0)
+        : [],
+      chiefComplaint: selections.showChiefComplaint ? String(visit.chief_complaint || '').trim() : '',
+      notes: selections.showNotes
+        ? (Array.isArray(visit.patient_notes) ? visit.patient_notes : [])
+          .map(n => String(n).trim()).filter(Boolean)
+        : [],
+      followUpDate: selections.showFollowUp ? String(visit.follow_up_date || '').trim() : '',
+    }
+
+    const hasContent = Boolean(rxPrintData.chiefComplaint)
+      || rxPrintData.rxItems.length > 0
+      || rxPrintData.notes.length > 0
+      || Boolean(rxPrintData.followUpDate)
+    if (!hasContent) return
+
+    await printRxOnly({ rxPrintData, layout })
   }
 
   async function completeVisit(visit) {
     try {
       const sent = await autoSendDraftForVisit(visit)
       await api.patch(`/opd-visits/${visit.id}/`, { status: 'completed' })
-      toast.success(sent ? 'Consultation done and draft sent to pharmacy' : 'Consultation done')
+      try {
+        await autoPrintVisitSlip(visit)
+      } catch (printErr) {
+        toast.error(printErr?.message || 'Visit completed but print failed')
+      }
+      if (sent === 'draft') toast.success('Consultation done and draft sent to pharmacy')
+      else if (sent === 'manual') toast.success('Consultation done (manual medicines noted)')
+      else toast.success('Consultation done')
       fetchVisits()
-    } catch (e) { toast.error(e.response?.data?.detail || 'Error') }
+    } catch (e) { toast.error(e.response?.data?.detail || e.message || 'Error') }
   }
 
   async function skipVisit(visit) {
@@ -1969,7 +2196,7 @@ function OPDTab({ aiMode = false }) {
                     </button>
                     <button onClick={() => completeVisit(v)}
                       className="bg-emerald-500 hover:bg-emerald-400 text-white text-sm px-6 py-2.5 rounded-xl font-bold flex items-center gap-2 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-                      <CheckCircle size={16} /> Mark Done
+                      <CheckCircle size={16} /> Mark Done and Print
                     </button>
                   </div>
                 </div>
@@ -3274,7 +3501,6 @@ function DischargeSummaryTab() {
   const dischargeSectionNavItems = useMemo(() => {
     const items = [
       { id: 'dds-metadata', Icon: ClipboardList, label: 'Metadata & Identifiers' },
-      { id: 'dds-vitals', Icon: Activity, label: 'Vitals at Discharge' },
       ...(summary.discharge_type === 'death' ? [{ id: 'dds-death', Icon: Stethoscope, label: 'Death Summary' }] : []),
       { id: 'dds-narrative', Icon: FileText, label: 'Clinical Narrative' },
       { id: 'dds-operative', Icon: Scissors, label: 'Operative / Procedure' },

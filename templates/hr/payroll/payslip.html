@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Payslip — {{ pay_period }}</title>
+<style>
+    @page {
+        size: A4;
+        margin: 32px 36px;
+    }
+
+    body {
+        font-family: Helvetica, Arial, sans-serif;
+        font-size: 12px;
+        color: #111111;
+        line-height: 1.5;
+        margin: 0;
+        padding: 0;
+    }
+
+    .peach {
+        background-color: #fcd5b8;
+    }
+
+    .doc-header {
+        text-align: center;
+        margin-bottom: 18px;
+    }
+
+    .company-logo {
+        max-width: 110px;
+        max-height: 52px;
+        margin-bottom: 8px;
+    }
+
+    .company-name {
+        font-size: 22px;
+        font-weight: bold;
+        margin: 0 0 8px 0;
+        color: #000000;
+    }
+
+    .payslip-title {
+        font-size: 15px;
+        font-weight: bold;
+        margin: 0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        color: #000000;
+    }
+
+    .data-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        margin-bottom: 12px;
+    }
+
+    .data-table td,
+    .data-table th {
+        border: 1.5px solid #000000;
+        padding: 8px 12px;
+        font-size: 12px;
+        vertical-align: middle;
+    }
+
+    .label-cell {
+        width: 42%;
+        text-align: left;
+        font-weight: normal;
+        color: #222222;
+    }
+
+    .value-cell {
+        width: 58%;
+        text-align: right;
+        color: #000000;
+    }
+
+    .section-head td {
+        font-size: 13px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .section-head .value-cell {
+        text-align: right;
+        font-weight: bold;
+    }
+
+    .total-row td {
+        font-size: 13px;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+
+    .total-row .value-cell {
+        text-align: right;
+        font-weight: bold;
+    }
+
+    .net-pay-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+        margin-bottom: 16px;
+    }
+
+    .net-pay-table td {
+        border: 2px solid #000000;
+        padding: 10px 12px;
+        font-size: 15px;
+        font-weight: bold;
+        text-transform: uppercase;
+        letter-spacing: 0.3px;
+    }
+
+    .net-pay-table .value-cell {
+        text-align: right;
+        font-size: 16px;
+    }
+
+    .payment-block {
+        font-size: 12px;
+        line-height: 1.7;
+        margin-top: 6px;
+        color: #111111;
+    }
+
+    .payment-block p {
+        margin: 0 0 4px 0;
+    }
+
+    .payment-block strong {
+        color: #000000;
+    }
+</style>
+</head>
+<body>
+
+<div class="doc-header">
+    {% if logo_url %}
+    <img class="company-logo" src="{{ logo_url }}" alt="Company Logo"/><br/>
+    {% endif %}
+    <div class="company-name">{{ company_name }}</div>
+    <div class="payslip-title">Salary Slip — {{ pay_period }}</div>
+</div>
+
+<table class="data-table">
+    <tr>
+        <td class="label-cell">Employee Name</td>
+        <td class="value-cell">{{ employee_name }}</td>
+    </tr>
+    <tr>
+        <td class="label-cell">Employee ID</td>
+        <td class="value-cell">{{ employee_code }}</td>
+    </tr>
+    <tr>
+        <td class="label-cell">Designation</td>
+        <td class="value-cell">{{ designation }}</td>
+    </tr>
+    <tr>
+        <td class="label-cell">Department</td>
+        <td class="value-cell">{{ department }}</td>
+    </tr>
+    <tr>
+        <td class="label-cell">Pay Period</td>
+        <td class="value-cell">{{ pay_period_range }}</td>
+    </tr>
+    {% if per_day_salary != "—" %}
+    <tr>
+        <td class="label-cell">Per Day Salary</td>
+        <td class="value-cell">₹ {{ per_day_salary }}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<table class="data-table">
+    <tr class="section-head peach">
+        <td class="label-cell">Earnings</td>
+        <td class="value-cell">Amount (INR)</td>
+    </tr>
+    {% for row in earnings_rows %}
+    <tr>
+        <td class="label-cell">{{ row.label }}</td>
+        <td class="value-cell">{{ row.amount }}</td>
+    </tr>
+    {% empty %}
+    <tr>
+        <td class="label-cell">&nbsp;</td>
+        <td class="value-cell">&nbsp;</td>
+    </tr>
+    {% endfor %}
+    <tr class="total-row peach">
+        <td class="label-cell">Gross Salary</td>
+        <td class="value-cell">{{ gross_salary }}</td>
+    </tr>
+</table>
+
+<table class="data-table">
+    <tr class="section-head peach">
+        <td class="label-cell">Deductions</td>
+        <td class="value-cell">Amount (INR)</td>
+    </tr>
+    {% for row in deductions_rows %}
+    <tr>
+        <td class="label-cell">{{ row.label }}</td>
+        <td class="value-cell">{{ row.amount }}</td>
+    </tr>
+    {% empty %}
+    <tr>
+        <td class="label-cell">&nbsp;</td>
+        <td class="value-cell">&nbsp;</td>
+    </tr>
+    {% endfor %}
+    <tr class="total-row peach">
+        <td class="label-cell">Total Deductions</td>
+        <td class="value-cell">{{ total_deductions }}</td>
+    </tr>
+</table>
+
+<table class="net-pay-table peach">
+    <tr>
+        <td class="label-cell">Net Pay</td>
+        <td class="value-cell">{{ net_salary }}</td>
+    </tr>
+</table>
+
+<div class="payment-block">
+    <p><strong>Payment Mode:</strong> {{ payment_mode }}</p>
+    {% if bank_account != "—" %}
+    <p><strong>Bank A/C Number:</strong> {{ bank_account }}</p>
+    {% endif %}
+    <p><strong>Date of Payment:</strong> {{ date_of_payment }}</p>
+    <p><strong>Amount in words:</strong> {{ net_salary_words }}</p>
+    {% if payslip_number %}
+    <p><strong>Payslip No:</strong> {{ payslip_number }}</p>
+    {% endif %}
+</div>
+
+</body>
+</html>

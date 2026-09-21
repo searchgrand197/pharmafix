@@ -24,8 +24,8 @@ const TABS = [
 ]
 
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-const CAT_ICON = { medication:'💊', nursing:'🩺', physiotherapy:'🏃', investigation:'🔬', diet:'🥗', other:'📋' }
+// ΓöÇΓöÇΓöÇ Helpers ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
+const CAT_ICON = { medication:'≡ƒÆè', nursing:'≡ƒ⌐║', physiotherapy:'≡ƒÅâ', investigation:'≡ƒö¼', diet:'≡ƒÑù', other:'≡ƒôï' }
 const STATUS_CLS = {
   pending:     'bg-amber-100 text-amber-700 border-amber-200',
   in_progress: 'bg-blue-100 text-blue-700 border-blue-200',
@@ -53,7 +53,7 @@ function getTaskPatientName(task) {
   )
 }
 
-// ─── Single expandable task card ─────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Single expandable task card ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function TaskCard({ task, onDone, onSkip }) {
   const [open, setOpen] = useState(false)
   const isPending = task.status === 'pending'
@@ -66,7 +66,7 @@ function TaskCard({ task, onDone, onSkip }) {
     <div className={`rounded-2xl border shadow-sm overflow-hidden transition-all ${rowBg}`}>
       <button type="button" onClick={() => setOpen(o => !o)}
         className="w-full text-left px-4 py-3 flex items-center gap-3">
-        <span className="text-2xl shrink-0">{CAT_ICON[task.item_category] || '📋'}</span>
+        <span className="text-2xl shrink-0">{CAT_ICON[task.item_category] || '≡ƒôï'}</span>
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded px-1.5 py-0.5">
@@ -79,7 +79,7 @@ function TaskCard({ task, onDone, onSkip }) {
           </div>
           <div className="flex items-center gap-2 mt-0.5">
             <Person sx={{ fontSize: 12, color: '#9ca3af', flexShrink: 0 }} />
-            <span className="text-xs text-gray-500 truncate">{patientName} · Bed {task.bed_code || 'N/A'}</span>
+            <span className="text-xs text-gray-500 truncate">{patientName} ┬╖ Bed {task.bed_code || 'N/A'}</span>
             <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full border ml-auto shrink-0 ${STATUS_CLS[task.status] || ''}`}>
               {task.status}
             </span>
@@ -153,7 +153,7 @@ function TaskCard({ task, onDone, onSkip }) {
   )
 }
 
-// ─── My Tasks Tab ────────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ My Tasks Tab ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function TasksTab() {
   const [tasks, setTasks] = useState([])
   const [loading, setLoading] = useState(true)
@@ -511,7 +511,7 @@ function TasksTab() {
         <div className="text-center py-12">
           <CheckCircle sx={{ mx: 'auto', color: '#34d399', mb: 1, fontSize: 40 }} />
           <p className="text-gray-500 font-medium">
-            {section === 'pending' ? 'No pending tasks — great work!' : `No ${section} tasks`}
+            {section === 'pending' ? 'No pending tasks ΓÇö great work!' : `No ${section} tasks`}
           </p>
         </div>
       ) : (
@@ -531,7 +531,7 @@ function TasksTab() {
                   {selectedCompletedPatientMeta?.patientName || 'Patient'} - Medication History
                 </p>
                 <p className="text-xs text-gray-500">
-                  Bed {selectedCompletedPatientMeta?.bedCode || 'N/A'} · {selectedCompletedPatientMeta?.totalDone || 0} completed
+                  Bed {selectedCompletedPatientMeta?.bedCode || 'N/A'} ┬╖ {selectedCompletedPatientMeta?.totalDone || 0} completed
                 </p>
               </div>
               <button
@@ -551,11 +551,11 @@ function TasksTab() {
                   {selectedPatientMedicationHistory.map((task) => (
                     <div key={task.id} className="rounded-xl border border-gray-100 bg-gray-50 px-3 py-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-base">{CAT_ICON[task.item_category] || '📋'}</span>
+                        <span className="text-base">{CAT_ICON[task.item_category] || '≡ƒôï'}</span>
                         <p className="text-sm font-semibold text-gray-800">{task.item_title}</p>
                       </div>
                       <p className="text-xs text-gray-500 mt-1">
-                        {task.date} {task.time_of_day ? task.time_of_day.slice(0, 5) : ''} · Bed {task.bed_code || 'N/A'}
+                        {task.date} {task.time_of_day ? task.time_of_day.slice(0, 5) : ''} ┬╖ Bed {task.bed_code || 'N/A'}
                       </p>
                       {task.completed_at && (
                         <p className="text-[11px] text-emerald-700 mt-1 font-medium">
@@ -574,7 +574,7 @@ function TasksTab() {
   )
 }
 
-// ─── Leave Tab ───────────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Leave Tab ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function LeaveTab() {
   const [form, setForm] = useState({
     leave_type: 'earned', start_date: format(new Date(), 'yyyy-MM-dd'),
@@ -590,7 +590,7 @@ function LeaveTab() {
   async function fetchLeaves() {
     try {
       const { data } = await api.get('/attendance/leaves/')
-      // Backend uses success_response → { success, data: [...] }
+      // Backend uses success_response ΓåÆ { success, data: [...] }
       const payload = data?.data || data?.results || data
       setLeaves(Array.isArray(payload) ? payload : [])
 
@@ -661,7 +661,7 @@ function LeaveTab() {
           {/* Earned leave this month tile */}
           <div className="flex items-center gap-1.5 bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-1.5">
             <span className="text-emerald-600 text-lg font-bold leading-none">
-              {earnedThisMonth === null ? '…' : earnedThisMonth}
+              {earnedThisMonth === null ? 'ΓÇª' : earnedThisMonth}
             </span>
             <div className="leading-tight">
               <p className="text-xs font-semibold text-emerald-700">Earned Leave</p>
@@ -716,7 +716,7 @@ function LeaveTab() {
           <div key={l.id} className="bg-white rounded-xl p-3 shadow-sm border border-gray-100 flex items-center gap-3">
             <div className="flex-1">
               <p className="text-sm font-semibold text-gray-800 capitalize">{l.leave_type} leave</p>
-              <p className="text-xs text-gray-500">{l.start_date} → {l.end_date} · {l.total_days} day(s)</p>
+              <p className="text-xs text-gray-500">{l.start_date} ΓåÆ {l.end_date} ┬╖ {l.total_days} day(s)</p>
             </div>
             <div className="flex items-center gap-2">
               <span className={`text-xs font-semibold px-2 py-1 rounded-full capitalize ${statusColor[l.status]}`}>{l.status}</span>
@@ -749,7 +749,7 @@ function LeaveTab() {
   )
 }
 
-// ─── Treatment Plan Tab ──────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Treatment Plan Tab ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 function TreatmentPlanTab() {
   const [admissions, setAdmissions] = useState([])
   const [selectedAdm, setSelectedAdm] = useState('')
@@ -799,21 +799,21 @@ function TreatmentPlanTab() {
     <div className="max-w-2xl mx-auto">
       <form onSubmit={submit} className="space-y-4">
         <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 space-y-3">
-          <h3 className="font-bold text-gray-800 flex items-center gap-2"><ClipboardList size={18} className="text-purple-500" /> New Treatment Plan</h3>
+          <h3 className="font-bold text-gray-800 flex items-center gap-2"><Assignment sx={{ fontSize: 18 }} className="text-purple-500" /> New Treatment Plan</h3>
           <div>
             <label className="text-xs text-gray-500 mb-1 block">Select Patient (IPD)</label>
             <select value={selectedAdm} onChange={e => setSelectedAdm(e.target.value)}
               className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none">
               <option value="">-- Select admission --</option>
               {admissions.map(a => (
-                <option key={a.id} value={a.id}>{a.patient_name || a.id} — Bed {a.bed_code || 'N/A'}</option>
+                <option key={a.id} value={a.id}>{a.patient_name || a.id} ΓÇö Bed {a.bed_code || 'N/A'}</option>
               ))}
             </select>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-3">
               <label className="text-xs text-gray-500 mb-1 block">Plan Name</label>
-              <input value={plan.name} onChange={e => setPlan(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Post-op Day 0–2"
+              <input value={plan.name} onChange={e => setPlan(p => ({ ...p, name: e.target.value }))} placeholder="e.g. Post-op Day 0ΓÇô2"
                 className="w-full border border-gray-200 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none" />
             </div>
             <div>
@@ -847,18 +847,18 @@ function TreatmentPlanTab() {
                     placeholder="e.g. Give glucose, Antibiotic..."
                     className="flex-1 border border-gray-200 rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-purple-500 focus:outline-none" />
                   {items.length > 1 && (
-                    <button type="button" onClick={() => removeItem(i)} className="text-red-400 hover:text-red-600 text-xs">✕</button>
+                    <button type="button" onClick={() => removeItem(i)} className="text-red-400 hover:text-red-600 text-xs">Γ£ò</button>
                   )}
                 </div>
                 <div className="grid grid-cols-4 gap-2">
                   <select value={item.category} onChange={e => updateItem(i, 'category', e.target.value)}
                     className="col-span-2 border border-gray-200 rounded-lg px-2 py-1.5 text-xs focus:outline-none">
-                    <option value="medication">💊 Medication</option>
-                    <option value="nursing">🩺 Nursing</option>
-                    <option value="physiotherapy">🏃 Physiotherapy</option>
-                    <option value="investigation">🔬 Investigation</option>
-                    <option value="diet">🥗 Diet</option>
-                    <option value="other">📋 Other</option>
+                    <option value="medication">≡ƒÆè Medication</option>
+                    <option value="nursing">≡ƒ⌐║ Nursing</option>
+                    <option value="physiotherapy">≡ƒÅâ Physiotherapy</option>
+                    <option value="investigation">≡ƒö¼ Investigation</option>
+                    <option value="diet">≡ƒÑù Diet</option>
+                    <option value="other">≡ƒôï Other</option>
                   </select>
                   <div className="relative">
                     <input type="number" min={0} max={30} value={item.day_offset}
@@ -886,7 +886,7 @@ function TreatmentPlanTab() {
   )
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+// ΓöÇΓöÇΓöÇ Main ΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇΓöÇ
 export default function StaffPortal() {
   useTimeDisplayMode()
   const [tab, setTab] = useState('tasks')

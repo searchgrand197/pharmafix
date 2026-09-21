@@ -272,6 +272,12 @@ class PharmacyInvoice(TimeStampedModel, UUIDPrimaryKeyModel):
     total_discount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     cgst = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     sgst = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    round_off = models.DecimalField(
+        max_digits=6,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        help_text="Paise adjustment folded into grand_total so retail bills settle in whole rupees.",
+    )
     grand_total = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     payment_method = models.CharField(max_length=20, default="cash")
     paid_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))

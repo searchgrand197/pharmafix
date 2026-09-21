@@ -7,6 +7,7 @@ from apps.pharmacy.calculations import (
     calculate_purchase_line_amounts,
     calculate_sale_gst_split,
     compute_marg_gst_on_base,
+    invoice_round_off,
     split_gst_equally,
 )
 
@@ -111,6 +112,19 @@ class MargPurchaseCalculationTests(SimpleTestCase):
     def test_split_gst_equally(self):
         a, b = split_gst_equally(Decimal("12.00"))
         self.assertEqual(a + b, Decimal("12.00"))
+
+
+class InvoiceRoundOffTests(SimpleTestCase):
+    def test_rounds_down_and_reports_deducted_paise(self):
+        self.assertEqual(invoice_round_off(Decimal("120.40")), (Decimal("120.00"), Decimal("-0.40")))
+
+    def test_rounds_up_at_half_a_rupee(self):
+        self.assertEqual(invoice_round_off(Decimal("120.50")), (Decimal("121.00"), Decimal("0.50")))
+        self.assertEqual(invoice_round_off(Decimal("120.60")), (Decimal("121.00"), Decimal("0.40")))
+
+    def test_whole_rupees_unchanged(self):
+        self.assertEqual(invoice_round_off(Decimal("120.00")), (Decimal("120.00"), Decimal("0.00")))
+        self.assertEqual(invoice_round_off(Decimal("0.00")), (Decimal("0.00"), Decimal("0.00")))
 
 
 class SaleGstSplitTests(SimpleTestCase):

@@ -105,6 +105,23 @@ class DashboardMarginAfterBatchDeleteTests(TestCase):
         self.assertEqual(med_after["total_margin"], 60.0)
         self.assertEqual(med_after["total_revenue"], 160.0)
 
+    def test_medicine_revenue_includes_gst_when_invoice_gst_enabled(self):
+        self.invoice.gst_enabled = True
+        self.invoice.cgst = Decimal("9.60")
+        self.invoice.sgst = Decimal("9.60")
+        self.invoice.grand_total = Decimal("179.20")
+        self.invoice.save(update_fields=["gst_enabled", "cgst", "sgst", "grand_total", "updated_at"])
+        self.item.cgst_rate = Decimal("6.00")
+        self.item.sgst_rate = Decimal("6.00")
+        self.item.save(update_fields=["cgst_rate", "sgst_rate", "updated_at"])
+
+        block = self._margin_block()
+        self.assertEqual(block["total_margin"], 60.0)
+        med = block["medicine_details"][0]
+        self.assertEqual(med["total_qty"], 2.0)
+        self.assertEqual(med["total_revenue"], 179.2)
+        self.assertEqual(med["total_margin"], 60.0)
+
     def test_margin_from_challan_when_snapshot_missing(self):
         """Older deleted batches with no snapshot still resolve cost from purchase history."""
         self.batch.unit_cost = Decimal("0.00")

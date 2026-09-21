@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from decimal import Decimal
+
 from rest_framework import serializers
 
 from apps.inventory.models import Medicine, MedicineBatch, MedicineCategory, MedicineReorderRule, StockLedger, Unit
@@ -232,11 +234,11 @@ class MedicineBatchCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 class MedicineBatchRatesUpdateSerializer(serializers.ModelSerializer):
-    """ERP: only sale pricing may be edited from the desk; cost/expiry/batch stay system-controlled."""
+    """ERP: sale pricing and cost price may be edited from the inventory desk."""
 
     class Meta:
         model = MedicineBatch
-        fields = ["mrp", "sale_rate"]
+        fields = ["mrp", "sale_rate", "unit_cost"]
 
 
 
@@ -244,6 +246,9 @@ class StockLedgerSerializer(serializers.ModelSerializer):
     pharmacy_id = serializers.UUIDField(read_only=True)
     medicine_name = serializers.CharField(source="medicine.name", read_only=True)
     batch_no = serializers.CharField(source="batch.batch_no", read_only=True)
+    invoice_no = serializers.SerializerMethodField()
+    customer_name = serializers.SerializerMethodField()
+    line_refund = serializers.SerializerMethodField()
 
     class Meta:
         model = StockLedger
@@ -258,9 +263,87 @@ class StockLedgerSerializer(serializers.ModelSerializer):
             "reason",
             "reference_type",
             "reference_id",
+            "invoice_no",
+            "customer_name",
+            "line_refund",
             "created_by",
             "created_at",
         ]
+
+    def _invoice_for(self, obj):
+        cache = self.context.setdefault("_invoice_cache", {})
+        if obj.reference_type not in ("pharmacy_edit", "pharmacy_cancel") or not obj.reference_id:
+            return None
+        rid = str(obj.reference_id)
+        cache_key = f"{obj.pharmacy_id}:{rid}"
+        if cache_key not in cache:
+            try:
+                from apps.pharmacy.models import PharmacyInvoice
+
+                cache[cache_key] = (
+                    PharmacyInvoice.objects.select_related("patient", "party")
+                    .filter(pk=rid, pharmacy_id=obj.pharmacy_id)
+                    .first()
+                )
+            except (PharmacyInvoice.DoesNotExist, ValueError):
+                cache[cache_key] = None
+        return cache[cache_key]
+
+    def get_invoice_no(self, obj):
+        inv = self._invoice_for(obj)
+        return inv.invoice_no if inv else None
+
+    def get_customer_name(self, obj):
+        inv = self._invoice_for(obj)
+        if not inv:
+            return None
+        if inv.party_id:
+            return inv.party_name_snapshot or getattr(inv.party, "name", None) or "Party"
+        p = inv.patient
+        if p:
+            return f"{p.first_name or ''} {p.last_name or ''}".strip() or "Patient"
+        return "Patient"
+
+    def _refund_context_for(self, invoice):
+        cache = self.context.setdefault("_ledger_refund_ctx", {})
+        key = str(invoice.id)
+        if key not in cache:
+            from apps.pharmacy.services.return_summary_service import _build_rate_map
+
+            cache[key] = {
+                "invoice": invoice,
+                "rate_map": _build_rate_map(invoice),
+                "batch_fallbacks": {},
+            }
+        return cache[key]
+
+    def get_line_refund(self, obj):
+        if obj.reason != StockLedger.Reason.RETURN_IN:
+            return None
+        if obj.reference_type not in ("pharmacy_edit", "pharmacy_cancel"):
+            return None
+        inv = self._invoice_for(obj)
+        if not inv:
+            return "0.00"
+        from apps.pharmacy.services.return_summary_service import (
+            _load_batch_fallbacks,
+            _rate_key,
+            calc_ledger_row_refund,
+        )
+
+        ctx = self._refund_context_for(inv)
+        row_key = _rate_key(obj.medicine_id, obj.batch_id)
+        if row_key not in ctx["rate_map"] and row_key not in ctx["batch_fallbacks"]:
+            ctx["batch_fallbacks"].update(
+                _load_batch_fallbacks([obj], ctx["rate_map"], bool(inv.gst_enabled))
+            )
+        refund = calc_ledger_row_refund(
+            obj,
+            inv,
+            rate_map=ctx["rate_map"],
+            batch_fallbacks=ctx["batch_fallbacks"],
+        )
+        return str(refund.quantize(Decimal("0.01")))
 
 
 class StockLedgerCreateSerializer(serializers.Serializer):

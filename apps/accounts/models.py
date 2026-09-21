@@ -12,11 +12,17 @@ from apps.shared.models import Hospital
 class UserManager(BaseUserManager):
     use_in_migrations = True
 
+    def normalize_email(self, email):
+        from apps.shared.email_normalization import normalize_email_address
+        if not email:
+            return email
+        return normalize_email_address(email)
+
     def _create_user(self, email: str, password: str | None, **extra_fields):
         if not email:
             raise ValueError("Email must be provided")
 
-        email = self.normalize_email(email)
+        email = self.normalize_email(email).strip().lower()
         user = self.model(email=email, **extra_fields)
         if password:
             user.set_password(password)
@@ -66,6 +72,10 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     is_staff = models.BooleanField(default=False)
     is_active = models.BooleanField(default=True)
+    must_change_password = models.BooleanField(
+        default=False,
+        help_text='When true, employee portal blocks access until password is changed.',
+    )
     date_joined = models.DateTimeField(default=timezone.now)
     last_login_at = models.DateTimeField(null=True, blank=True)
 
@@ -89,3 +99,9 @@ class User(AbstractBaseUser, PermissionsMixin):
 
     def has_module_permission(self, module_code: str) -> bool:
         return bool(self.is_superuser)
+
+    def save(self, *args, **kwargs):
+        if self.email:
+            from apps.shared.email_normalization import normalize_email_address
+            self.email = normalize_email_address(self.email)
+        return super().save(*args, **kwargs)

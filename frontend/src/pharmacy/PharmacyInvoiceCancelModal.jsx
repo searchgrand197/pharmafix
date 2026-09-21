@@ -37,6 +37,13 @@ export default function PharmacyInvoiceCancelModal({ invoice, onClose, onSuccess
     }
   }
 
+  function handleReasonKeyDown(e) {
+    if (e.key !== 'Enter' || e.shiftKey) return
+    e.preventDefault()
+    if (cancelling) return
+    submit()
+  }
+
   return (
     <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
       <div
@@ -67,6 +74,7 @@ export default function PharmacyInvoiceCancelModal({ invoice, onClose, onSuccess
             <textarea
               value={reason}
               onChange={(e) => setReason(e.target.value)}
+              onKeyDown={handleReasonKeyDown}
               rows={4}
               className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:border-red-500 focus:ring-1 focus:ring-red-500 outline-none resize-none"
               placeholder="Enter reason for cancellation"

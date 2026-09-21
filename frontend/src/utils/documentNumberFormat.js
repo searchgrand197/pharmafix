@@ -89,6 +89,16 @@ export const DEFAULT_DOCUMENT_NUMBER_PARTS = {
     separator: '-',
     seq_padding: 4,
   },
+  ipd_final_bill: {
+    kind: 'IPDFIN',
+    prefix: 'IPD',
+    use_hospital_prefix: true,
+    use_invoice_prefix: false,
+    include_year: true,
+    include_slug: false,
+    separator: '-',
+    seq_padding: 0,
+  },
 }
 
 export const DOCUMENT_NUMBER_FORMAT_ROWS = [
@@ -101,6 +111,7 @@ export const DOCUMENT_NUMBER_FORMAT_ROWS = [
   { key: 'ipd_service', label: 'IPD Service Charge', showSlug: true, showHospitalPrefixToggle: false, showInvoicePrefixToggle: false },
   { key: 'ipd_refund', label: 'IPD Discharge Refund', showSlug: true, showHospitalPrefixToggle: false, showInvoicePrefixToggle: false },
   { key: 'ipd_room', label: 'IPD Room Charge', showSlug: true, showHospitalPrefixToggle: false, showInvoicePrefixToggle: false },
+  { key: 'ipd_final_bill', label: 'IPD Final Bill', showSlug: false, showHospitalPrefixToggle: true, showInvoicePrefixToggle: false },
 ]
 
 const PREVIEW_SAMPLE = {

@@ -14,6 +14,7 @@ export function getApiErrorMessage(err) {
   }
   if (res?.message) return String(res.message);
   if (typeof res?.detail === 'string' && res.detail.trim()) return String(res.detail);
+  if (Array.isArray(res?.detail) && res.detail.length) return String(res.detail[0]);
   if (res?.error) return String(res.error);
   if (Array.isArray(res?.non_field_errors) && res.non_field_errors.length) {
     return String(res.non_field_errors[0]);

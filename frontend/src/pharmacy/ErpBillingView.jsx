@@ -6,6 +6,7 @@ import toast from 'react-hot-toast'
 import { withTimeTokens } from '../utils/dateTimeFormat'
 import { format, isValid, parseISO } from 'date-fns'
 import {
+  computeInvoiceRoundOff,
   computeMargGstOnBase,
   computeSaleGstTotals,
   isPartialPercentInput,
@@ -80,6 +81,14 @@ function safeFormat(dateVal, fmtStr) {
   } catch {
     return '--/--'
   }
+}
+
+function invoiceDateTimeInputToIso(dateValue, timeValue) {
+  if (!dateValue) return null
+  const normalizedTime = timeValue || '00:00'
+  const d = new Date(`${dateValue}T${normalizedTime}`)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
 }
 
 function preferredPackFromConversions(conversions = {}) {
@@ -533,6 +542,11 @@ function ErpBillingViewInner({
     () => Math.max(0, Math.round((grandTotal - billDiscountAmount) * 100) / 100),
     [grandTotal, billDiscountAmount],
   )
+  /** Retail bills settle in whole rupees; party (B2B / GST) bills stay exact. */
+  const { payable: payableTotal, roundOff } = useMemo(
+    () => (b2bEnabled ? { payable: netGrandTotal, roundOff: 0 } : computeInvoiceRoundOff(netGrandTotal)),
+    [netGrandTotal, b2bEnabled],
+  )
 
   /** List-side gross: qty×selling rate — matches billing GST base. */
   const lineGrossTotal = useMemo(() => {
@@ -550,8 +564,8 @@ function ErpBillingViewInner({
       setPaidAmount('0.00')
       return
     }
-    setPaidAmount(netGrandTotal.toFixed(2))
-  }, [paymentMethod, netGrandTotal, linkedAdmission])
+    setPaidAmount(payableTotal.toFixed(2))
+  }, [paymentMethod, payableTotal, linkedAdmission])
 
   React.useEffect(() => {
     if (!linkedAdmission && paymentMethod === 'credit') {
@@ -620,10 +634,11 @@ function ErpBillingViewInner({
       subtotal: taxableSubtotal,
       cgst,
       sgst,
-      grandTotal: netGrandTotal,
+      roundOff,
+      grandTotal: payableTotal,
       updatedAt: Date.now(),
     }))
-  }, [rows, selectedPt, partyId, partyName, partyDetails, netGrandTotal, taxableSubtotal, cgst, sgst, channelOutlet, outletSettings, b2bEnabled])
+  }, [rows, selectedPt, partyId, partyName, partyDetails, payableTotal, roundOff, taxableSubtotal, cgst, sgst, channelOutlet, outletSettings, b2bEnabled])
 
   React.useEffect(() => {
     if (!replacingRowId) return
@@ -902,7 +917,7 @@ function ErpBillingViewInner({
     }
     if (paymentMethod !== 'credit') {
       const paid = Number(paidAmount || 0)
-      if (Math.abs(paid - netGrandTotal) > 0.009) {
+      if (Math.abs(paid - payableTotal) > 0.009) {
         toast.error('For cash/upi/other, full amount must be paid')
         return
       }
@@ -917,6 +932,7 @@ function ErpBillingViewInner({
       }
 
       const walkInMeta = !b2bEnabled && selectedPt?._walkInBilling
+      const invoiceDatetimeIso = invoiceDateTimeInputToIso(invoiceDate, invoiceTime)
       const { data: invData } = await api.post('/pharmacy/invoices/', {
         patient: b2bEnabled ? null : selectedPt.id,
         party: b2bEnabled ? partyId : null,
@@ -927,13 +943,15 @@ function ErpBillingViewInner({
         billing_hospital_name: walkInMeta ? (selectedPt._billingHospitalName || '') : '',
         invoice_no: invoiceNo || undefined,
         date: invoiceDate || undefined,
+        ...(invoiceDatetimeIso ? { invoice_datetime: invoiceDatetimeIso } : {}),
         gst_enabled: gstEnabled,
         subtotal: taxableSubtotal.toFixed(2),
         cgst: cgst.toFixed(2),
         sgst: sgst.toFixed(2),
-        grand_total: netGrandTotal.toFixed(2),
+        round_off: roundOff.toFixed(2),
+        grand_total: payableTotal.toFixed(2),
         payment_method: paymentMethod,
-        paid_amount: paymentMethod === 'credit' ? '0.00' : netGrandTotal.toFixed(2),
+        paid_amount: paymentMethod === 'credit' ? '0.00' : payableTotal.toFixed(2),
         status: 'finalized',
       })
       const invoice = invData?.data || invData
@@ -1029,10 +1047,11 @@ function ErpBillingViewInner({
         subtotal: taxableSubtotal,
         cgst,
         sgst,
-        grand_total: netGrandTotal,
+        round_off: roundOff,
+        grand_total: payableTotal,
         payment_method: paymentMethod,
-        paid_amount: paymentMethod === 'credit' ? 0 : netGrandTotal,
-        due_amount: paymentMethod === 'credit' ? netGrandTotal : 0,
+        paid_amount: paymentMethod === 'credit' ? 0 : payableTotal,
+        due_amount: paymentMethod === 'credit' ? payableTotal : 0,
       })
       setRows(normalizeRows(Array.from({ length: MIN_ROWS }, () => createNewRow()), createNewRow))
       setSelectedPt(null)
@@ -1732,9 +1751,17 @@ function ErpBillingViewInner({
                 <span>No tax</span>
               </div>
             )}
+            {roundOff !== 0 ? (
+              <div className="flex justify-between text-[9px] gap-2">
+                <span className="text-slate-600">Round off</span>
+                <span className="tabular-nums">
+                  {roundOff > 0 ? '+' : '−'}₹{Math.abs(roundOff).toFixed(2)}
+                </span>
+              </div>
+            ) : null}
             <div className="flex justify-end items-center gap-0.5 text-[1.35rem] font-black text-slate-900 pt-1">
               <span className="text-slate-600 text-sm font-semibold">₹</span>
-              <span className="tabular-nums">{netGrandTotal.toFixed(2)}</span>
+              <span className="tabular-nums">{payableTotal.toFixed(2)}</span>
             </div>
           </div>
           <button type="button" onClick={handleSave} className="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white py-2 rounded-lg text-sm font-bold shadow-md shadow-blue-200 transition-all">

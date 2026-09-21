@@ -48,6 +48,16 @@ DEFAULT_DOCUMENT_NUMBER_PARTS: dict[str, dict[str, Any]] = {
         "separator": "-",
         "seq_padding": 0,
     },
+    "expense_voucher": {
+        "kind": "EXP",
+        "prefix": "",
+        "use_hospital_prefix": True,
+        "use_invoice_prefix": False,
+        "include_year": True,
+        "include_slug": False,
+        "separator": "-",
+        "seq_padding": 0,
+    },
     "receipt": {
         "kind": "",
         "prefix": "",
@@ -98,6 +108,26 @@ DEFAULT_DOCUMENT_NUMBER_PARTS: dict[str, dict[str, Any]] = {
         "separator": "-",
         "seq_padding": 4,
     },
+    "ipd_final_bill": {
+        "kind": "IPDFIN",
+        "prefix": "IPD",
+        "use_hospital_prefix": True,
+        "use_invoice_prefix": False,
+        "include_year": True,
+        "include_slug": False,
+        "separator": "-",
+        "seq_padding": 0,
+    },
+    "opd_payment_slip": {
+        "kind": "OPDPS",
+        "prefix": "",
+        "use_hospital_prefix": True,
+        "use_invoice_prefix": False,
+        "include_year": True,
+        "include_slug": False,
+        "separator": "-",
+        "seq_padding": 0,
+    },
 }
 
 DEFAULT_DOCUMENT_NUMBER_FORMATS = DEFAULT_DOCUMENT_NUMBER_PARTS
@@ -107,11 +137,14 @@ DOCUMENT_TYPE_LABELS = {
     "opd": "OPD Number",
     "ipd": "IPD Number",
     "payment_slip": "Payment Slip",
+    "expense_voucher": "Expense Voucher",
     "receipt": "Receipt / Invoice",
     "ipd_advance": "IPD Advance Slip",
     "ipd_service": "IPD Service Charge",
     "ipd_refund": "IPD Discharge Refund",
     "ipd_room": "IPD Room Charge",
+    "ipd_final_bill": "IPD Final Bill",
+    "opd_payment_slip": "OPD Payment Slip",
 }
 
 MAX_LENGTH_BY_DOC_TYPE = {
@@ -119,11 +152,14 @@ MAX_LENGTH_BY_DOC_TYPE = {
     "opd": 50,
     "ipd": 50,
     "payment_slip": 80,
+    "expense_voucher": 80,
     "receipt": 60,
     "ipd_advance": 60,
     "ipd_service": 60,
     "ipd_refund": 60,
     "ipd_room": 60,
+    "ipd_final_bill": 80,
+    "opd_payment_slip": 80,
 }
 
 

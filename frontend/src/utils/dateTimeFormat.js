@@ -5,23 +5,19 @@ export const TIME_DISPLAY_MODE_CHANGED = 'time-display-mode-changed'
 
 const TOKENS_24H = {
   time: 'HH:mm',
-  timeSeconds: 'HH:mm:ss',
-  dateTime: 'd/M/yyyy HH:mm',
-  dateTimeSeconds: 'd/M/yyyy HH:mm:ss',
-  dateTimeParen: 'd/M/yyyy (HH:mm)',
-  dateTimeParenSeconds: 'd/M/yyyy (HH:mm:ss)',
+  dateTime: 'dd/MM/yyyy HH:mm',
+  dateTimeParen: 'dd/MM/yyyy (HH:mm)',
 }
 
 const TOKENS_12H = {
   time: 'h:mm a',
-  timeSeconds: 'h:mm:ss a',
-  dateTime: 'd/M/yyyy h:mm a',
-  dateTimeSeconds: 'd/M/yyyy h:mm:ss a',
-  dateTimeParen: 'd/M/yyyy (h:mm a)',
-  dateTimeParenSeconds: 'd/M/yyyy (h:mm:ss a)',
+  dateTime: 'dd/MM/yyyy h:mm a',
+  dateTimeParen: 'dd/MM/yyyy (h:mm a)',
 }
 
-let cachedMode = '24h'
+const TIME_TOKEN_PLACEHOLDER = '\u0000TIME\u0000'
+
+let cachedMode = '12h'
 
 function normalizeMode(raw) {
   return raw === '12h' ? '12h' : '24h'
@@ -51,49 +47,64 @@ function toDate(value) {
   return d
 }
 
-export function formatTime(value, { withSeconds = false } = {}) {
+/** Seconds are never shown — `withSeconds` is kept for call-site compatibility. */
+export function formatTime(value, { withSeconds: _withSeconds = false } = {}) {
   const d = toDate(value)
   if (!d) return '—'
-  const tokens = getTimeFormatTokens()
-  return format(d, withSeconds ? tokens.timeSeconds : tokens.time)
+  return format(d, getTimeFormatTokens().time)
 }
 
+export function formatDateOnly(value, { dateStyle = 'dd/MM/yyyy', empty = '' } = {}) {
+  const d = toDate(value)
+  if (!d) return empty
+  try {
+    return format(d, dateStyle)
+  } catch {
+    return empty
+  }
+}
+
+/** Seconds are never shown — `withSeconds` is kept for call-site compatibility. */
 export function formatDateTime(value, {
-  withSeconds = false,
+  withSeconds: _withSeconds = false,
   paren = false,
-  dateStyle = 'd/M/yyyy',
+  dateStyle = 'dd/MM/yyyy',
 } = {}) {
   const d = toDate(value)
   if (!d) return '—'
   const tokens = getTimeFormatTokens()
   if (paren) {
-    const timePart = withSeconds ? tokens.timeSeconds : tokens.time
-    return `${format(d, dateStyle)} (${format(d, timePart)})`
+    return `${format(d, dateStyle)} (${format(d, tokens.time)})`
   }
-  if (dateStyle !== 'd/M/yyyy') {
-    const timePart = withSeconds ? tokens.timeSeconds : tokens.time
-    return `${format(d, dateStyle)} ${format(d, timePart)}`
+  if (dateStyle !== 'dd/MM/yyyy') {
+    return `${format(d, dateStyle)} ${format(d, tokens.time)}`
   }
-  return format(d, withSeconds ? tokens.dateTimeSeconds : tokens.dateTime)
+  return format(d, tokens.dateTime)
 }
 
-/** Ledger / IPD receipt lines: date with time in parentheses (matches print). */
+/** Ledger / IPD receipt lines: date with time in parentheses (no seconds). */
 export function formatReceiptDateTime(value) {
   const d = toDate(value)
   if (!d) return '—'
   const tokens = getTimeFormatTokens()
-  return `${format(d, 'd/M/yyyy')} (${format(d, tokens.timeSeconds)})`
+  return `${format(d, 'dd/MM/yyyy')} (${format(d, tokens.time)})`
 }
 
-/** Build a date-fns pattern with the current time tokens substituted. */
+/** Build a date-fns pattern with the current time tokens substituted (seconds stripped). */
 export function withTimeTokens(pattern) {
   const tokens = getTimeFormatTokens()
+  const ph = TIME_TOKEN_PLACEHOLDER
+  // Substitute via a placeholder so `h:mm a` cannot match inside `hh:mm a`
+  // (that produced `hhh:mm a` → 012:23 PM).
   return String(pattern || '')
-    .replace(/HH:mm:ss/g, tokens.timeSeconds)
-    .replace(/HH:mm/g, tokens.time)
-    .replace(/h:mm:ss a/g, tokens.timeSeconds)
-    .replace(/h:mm a/g, tokens.time)
-    .replace(/hh:mm a/g, tokens.time)
+    .replace(/HH:mm:ss/g, ph)
+    .replace(/hh:mm:ss a/g, ph)
+    .replace(/h:mm:ss a/g, ph)
+    .replace(/HH:mm/g, ph)
+    .replace(/hh:mm a/g, ph)
+    .replace(/h:mm a/g, ph)
+    .split(ph)
+    .join(tokens.time)
 }
 
 export function formatWithPattern(dateVal, fmtStr, { empty = '—' } = {}) {

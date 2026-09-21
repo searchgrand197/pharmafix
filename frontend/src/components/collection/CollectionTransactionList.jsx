@@ -14,11 +14,13 @@ function formatEntryDateTime(iso) {
 
 function tokenLabel(entry) {
   if (entry.entry_type === 'payment') return 'P'
+  if (entry.entry_type === 'expense') return 'EXP'
   if (entry.entry_type === 'handover') return 'HO'
   return `#${entry.token_number || entry.queue_number || '--'}`
 }
 
 function modeBadgeClass(mode, entry) {
+  if (entry.entry_type === 'expense') return 'bg-rose-100 text-rose-700'
   if (entry.entry_type === 'handover') {
     if (entry.handover_status === 'pending') return 'bg-amber-100 text-amber-800'
     if (entry.handover_status === 'accepted') return 'bg-emerald-100 text-emerald-700'
@@ -30,6 +32,7 @@ function modeBadgeClass(mode, entry) {
 }
 
 function modeBadgeLabel(entry) {
+  if (entry.entry_type === 'expense') return 'expense'
   if (entry.entry_type === 'handover') {
     return entry.handover_status === 'pending' ? 'pending' : entry.handover_status || 'handover'
   }
@@ -38,9 +41,21 @@ function modeBadgeLabel(entry) {
 
 function CollectionRow({ entry, showDateTimeColumn }) {
   const isHandover = entry.entry_type === 'handover'
+  const isExpense = entry.entry_type === 'expense'
+  const isOtherFunds = isExpense && entry.expense_source === 'other_funds'
   const rowClass = isHandover
     ? 'grid grid-cols-12 px-4 py-2.5 items-center bg-amber-50/40 hover:bg-amber-50/70 text-sm transition-colors'
-    : 'grid grid-cols-12 px-4 py-2.5 items-center hover:bg-white text-sm transition-colors group'
+    : isOtherFunds
+      ? 'grid grid-cols-12 px-4 py-2.5 items-center bg-slate-50/50 hover:bg-slate-50/80 text-sm transition-colors'
+      : isExpense
+        ? 'grid grid-cols-12 px-4 py-2.5 items-center bg-rose-50/30 hover:bg-rose-50/50 text-sm transition-colors'
+        : 'grid grid-cols-12 px-4 py-2.5 items-center hover:bg-white text-sm transition-colors group'
+
+  const amountDisplay = isOtherFunds
+    ? <span className="text-slate-500 line-through">₹{Number(entry.amount || 0).toLocaleString('en-IN')}</span>
+    : isExpense
+      ? <span className="text-rose-700">₹{entry.amount}</span>
+      : `₹${entry.amount}`
 
   if (showDateTimeColumn) {
     return (
@@ -51,11 +66,14 @@ function CollectionRow({ entry, showDateTimeColumn }) {
         </div>
         <div className="col-span-3 font-bold text-gray-800 truncate" title={entry.patient_name}>
           {entry.patient_name}
+          {isOtherFunds && <span className="ml-1 text-[9px] font-bold text-slate-500 bg-slate-100 px-1 py-0.5 rounded align-middle">Other Funds</span>}
         </div>
-        <div className="col-span-2 text-right font-black text-gray-900">₹{entry.amount}</div>
+        <div className="col-span-2 text-right font-black text-gray-900">
+          {amountDisplay}
+        </div>
         <div className="col-span-2 text-right">
           <span
-            className={`text-[10px] font-black uppercase tracking-tighter px-2 py-0.5 rounded-md ${modeBadgeClass(entry.payment_mode, entry)}`}
+            className={`text-[10px] font-black uppercase tracking-tighter px-2 py-0.5 rounded-md ${isOtherFunds ? 'bg-slate-100 text-slate-600' : modeBadgeClass(entry.payment_mode, entry)}`}
           >
             {modeBadgeLabel(entry)}
           </span>
@@ -74,11 +92,16 @@ function CollectionRow({ entry, showDateTimeColumn }) {
       <div className="col-span-1 font-mono font-bold text-gray-400 group-hover:text-emerald-600 transition-colors">
         {tokenLabel(entry)}
       </div>
-      <div className="col-span-4 font-bold text-gray-800 truncate">{entry.patient_name}</div>
-      <div className="col-span-2 text-right font-black text-gray-900">₹{entry.amount}</div>
+      <div className="col-span-4 font-bold text-gray-800 truncate">
+        {entry.patient_name}
+        {isOtherFunds && <span className="ml-1 text-[9px] font-bold text-slate-500 bg-slate-100 px-1 py-0.5 rounded align-middle">Other Funds</span>}
+      </div>
+      <div className="col-span-2 text-right font-black text-gray-900">
+        {amountDisplay}
+      </div>
       <div className="col-span-2 text-right">
         <span
-          className={`text-[10px] font-black uppercase tracking-tighter px-2 py-0.5 rounded-md ${modeBadgeClass(entry.payment_mode, entry)}`}
+          className={`text-[10px] font-black uppercase tracking-tighter px-2 py-0.5 rounded-md ${isOtherFunds ? 'bg-slate-100 text-slate-600' : modeBadgeClass(entry.payment_mode, entry)}`}
         >
           {modeBadgeLabel(entry)}
         </span>
@@ -103,7 +126,7 @@ export default function CollectionTransactionList({
   const [currentPage, setCurrentPage] = useState(1)
 
   const paidEntries = useMemo(
-    () => (entries || []).filter((v) => parseAmount(v.amount) > 0),
+    () => (entries || []).filter((v) => v.entry_type === 'expense' || parseAmount(v.amount) > 0),
     [entries],
   )
 

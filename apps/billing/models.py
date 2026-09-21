@@ -30,6 +30,19 @@ class InvoiceNumberSequence(TimeStampedModel):
         indexes = [models.Index(fields=["hospital", "year"])]
 
 
+class IPDFinalBillSequence(TimeStampedModel):
+    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, related_name="ipd_final_bill_sequences")
+    year = models.PositiveIntegerField()
+    last_seq = models.PositiveIntegerField(default=0)
+
+    class Meta:
+        unique_together = [("hospital", "year")]
+        indexes = [models.Index(fields=["hospital", "year"])]
+
+    def __str__(self) -> str:
+        return f"{self.hospital_id}-{self.year}-{self.last_seq}"
+
+
 class BillingInvoice(SoftDeleteModel, TimeStampedModel, UUIDPrimaryKeyModel):
     class Status(models.TextChoices):
         DRAFT = "draft"
@@ -118,6 +131,55 @@ class InvoiceItem(TimeStampedModel, UUIDPrimaryKeyModel):
         return self.description
 
 
+class IPDFinalBill(TimeStampedModel, UUIDPrimaryKeyModel):
+    # Editable in Django admin (overrides TimeStampedModel.editable=False).
+    created_at = models.DateTimeField(default=timezone.now)
+
+    admission = models.OneToOneField(IPDAdmission, on_delete=models.PROTECT, related_name="final_bill")
+    hospital = models.ForeignKey(Hospital, on_delete=models.PROTECT, related_name="ipd_final_bills")
+    patient = models.ForeignKey(Patient, on_delete=models.PROTECT, related_name="ipd_final_bills")
+    bill_no = models.CharField(max_length=60, blank=True)
+
+    patient_name = models.CharField(max_length=300, blank=True)
+    guardian_name = models.CharField(max_length=300, blank=True)
+    patient_phone = models.CharField(max_length=30, blank=True)
+    patient_address = models.TextField(blank=True)
+    consultant_name = models.CharField(max_length=200, blank=True)
+    room_bed = models.CharField(max_length=100, blank=True)
+    scheme_name = models.CharField(max_length=200, blank=True)
+    admission_date = models.DateTimeField(null=True, blank=True)
+    discharge_date = models.DateTimeField(null=True, blank=True)
+
+    gross_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    discount_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    net_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    amount_paid = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    due_amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        indexes = [models.Index(fields=["hospital", "bill_no"]), models.Index(fields=["patient", "created_at"])]
+
+    def __str__(self) -> str:
+        return f"Final Bill {self.bill_no or self.id} - {self.patient_name}"
+
+
+class IPDFinalBillItem(TimeStampedModel, UUIDPrimaryKeyModel):
+    final_bill = models.ForeignKey(IPDFinalBill, on_delete=models.CASCADE, related_name="items")
+    description = models.CharField(max_length=300)
+    category = models.CharField(max_length=120, blank=True)
+    quantity = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal("1.00"))
+    rate = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+
+    class Meta:
+        indexes = [models.Index(fields=["final_bill", "description"])]
+
+    def __str__(self) -> str:
+        return f"{self.description} - {self.amount}"
+
+
 class DailyClosingSummary(TimeStampedModel, UUIDPrimaryKeyModel):
     hospital = models.ForeignKey(Hospital, on_delete=models.PROTECT, related_name="daily_closings")
     closing_date = models.DateField()
@@ -128,4 +190,49 @@ class DailyClosingSummary(TimeStampedModel, UUIDPrimaryKeyModel):
 
     class Meta:
         unique_together = [("hospital", "closing_date")]
+
+
+# ── Admin-only proxy models (same table, separate admin lists; no schema change) ──
+
+
+class IPDAdvanceInvoice(BillingInvoice):
+    class Meta:
+        proxy = True
+        verbose_name = "IPD Advance Bill"
+        verbose_name_plural = "IPD Advance Bills"
+
+
+class IPDServiceInvoice(BillingInvoice):
+    class Meta:
+        proxy = True
+        verbose_name = "IPD Service Bill"
+        verbose_name_plural = "IPD Service Bills"
+
+
+class IPDRoomInvoice(BillingInvoice):
+    class Meta:
+        proxy = True
+        verbose_name = "IPD Room Bill"
+        verbose_name_plural = "IPD Room Bills"
+
+
+class IPDRefundInvoice(BillingInvoice):
+    class Meta:
+        proxy = True
+        verbose_name = "IPD Refund Bill"
+        verbose_name_plural = "IPD Refund Bills"
+
+
+class OPDBillingInvoice(BillingInvoice):
+    class Meta:
+        proxy = True
+        verbose_name = "OPD Bill"
+        verbose_name_plural = "OPD Bills"
+
+
+class OtherBillingInvoice(BillingInvoice):
+    class Meta:
+        proxy = True
+        verbose_name = "Other Bill"
+        verbose_name_plural = "Other Bills"
 

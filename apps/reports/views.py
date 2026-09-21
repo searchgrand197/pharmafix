@@ -9,6 +9,7 @@ from rest_framework.views import APIView
 
 from apps.billing.collection_attribution import doctor_name_map
 from apps.billing.models import BillingInvoice, CollectionAttribution
+from apps.expenses.models import ExpenseTransaction
 from apps.opd.models import OPDVisit
 from apps.payments.models import PaymentTransaction
 from apps.reports.doctor_revenue import build_doctor_revenue_report
@@ -118,11 +119,27 @@ class CollectionSummaryView(APIView):
         else:
             grand_total = doctors_grand
 
+        expense_qs = ExpenseTransaction.objects.filter(
+            hospital_id=hospital_id,
+            voided=False,
+            status=ExpenseTransaction.Status.SUCCESS,
+            source=ExpenseTransaction.Source.COLLECTION,
+            is_deleted=False,
+        )
+        if date_from:
+            expense_qs = expense_qs.filter(paid_at__date__gte=date_from)
+        if date_to:
+            expense_qs = expense_qs.filter(paid_at__date__lte=date_to)
+        expenses_total = _decimal(expense_qs.aggregate(total=Sum("total_amount"))["total"])
+        net_total = grand_total - expenses_total
+
         return success_response(
             data={
                 "hospital_self": hospital_self if not doctor_filter else {"opd_fees": "0.00", "payments": "0.00", "total": "0.00"},
                 "doctors": doctors_out,
-                "grand_total": str(grand_total),
+                "grand_total": f"{grand_total:.2f}",
+                "expenses_total": f"{expenses_total:.2f}",
+                "net_total": f"{net_total:.2f}",
                 "date_from": date_from.isoformat() if date_from else None,
                 "date_to": date_to.isoformat() if date_to else None,
             }

@@ -69,6 +69,7 @@ def create_patient_timeline_event(
     treatment_plan=None,
     treatment_item=None,
     treatment_task=None,
+    ipd_process_log=None,
     created_by=None,
 ):
     """Create a single audit timeline event for treatment history."""
@@ -83,6 +84,7 @@ def create_patient_timeline_event(
         treatment_plan=treatment_plan,
         treatment_item=treatment_item,
         treatment_task=treatment_task,
+        ipd_process_log=ipd_process_log,
         created_by=created_by,
     )
 

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import {
   ShoppingBag as ShoppingBagIcon,
   Search as SearchIcon,
@@ -23,12 +24,19 @@ import {
   Groups as GroupsIcon,
   ExpandMore as ExpandMoreIcon,
   ExpandLess as ExpandLessIcon,
+  AssignmentReturn as AssignmentReturnIcon,
+  ArrowBack as ArrowBackMuiIcon,
+  Person as PersonMuiIcon,
+  Print as PrintMuiIcon,
+  History as HistoryMuiIcon,
 } from '@mui/icons-material'
 import api, { getHospitalId } from '../api'
 import toast from 'react-hot-toast'
 import { useAuthStore } from '../stores/authStore'
 import { withTimeTokens, useTimeDisplayMode } from '../utils/dateTimeFormat'
 import { format } from 'date-fns'
+import { AmPmTimeInput, FormattedDateInput } from '../components/DateTimeInputs'
+import { matchPharmacyPath, pathForSection, pathForPurchaseSubView } from './pharmacyRoutes'
 import ErpBillingView from '../pharmacy/ErpBillingView'
 import PharmacyInvoicePrint from '../pharmacy/PharmacyInvoicePrint'
 import SettingsPanel, { UnsavedSettingsDialog } from '../pharmacy/SettingsPanel'
@@ -41,8 +49,10 @@ import PartiesView from '../pharmacy/PartiesView'
 import DraftsView from '../pharmacy/DraftsView'
 import PharmacyInvoiceViewModal from '../pharmacy/PharmacyInvoiceViewModal'
 import PharmacyInvoiceCancelModal from '../pharmacy/PharmacyInvoiceCancelModal'
-import { parseApiError } from '../pharmacy/pharmacyCalculations'
-import { normalizeDiscountPercentInput } from '../pharmacy/billingUtils'
+import { computeInvoiceRoundOff, parseApiError } from '../pharmacy/pharmacyCalculations'
+import { normalizeDiscountPercentInput, formatBillQtyForOutlet, packSizeFromInvoiceItem, qtySuffixFromMedicine, computeBaseQtyFromPacksLoose } from '../pharmacy/billingUtils'
+import { calcLineRefund, calcPreviewTotals, buildReturnPayload, validateReturn, isFullBillReturn, groupReturnHistoryRows } from '../pharmacy/returnUtils'
+import ReturnFullBillCancelModal from '../pharmacy/ReturnFullBillCancelModal'
 import {
   resolveCategoryRules,
   packFieldLabel,
@@ -51,6 +61,7 @@ import {
   normalizeCategoryName,
 } from '../pharmacy/categoryRulePresets'
 import { mergeCategoryNames } from '../pharmacy/pharmacyCategoryNames'
+import { ensurePharmacyBranchContext } from '../services/pharmacyService'
 
 function asMuiIcon(IconComponent) {
   return function IconBridge({ size, className, sx, ...rest }) {
@@ -80,6 +91,11 @@ const ChevronRight = asMuiIcon(ChevronRightIcon)
 const Groups = asMuiIcon(GroupsIcon)
 const ExpandMore = asMuiIcon(ExpandMoreIcon)
 const ExpandLess = asMuiIcon(ExpandLessIcon)
+const ReturnIcon = asMuiIcon(AssignmentReturnIcon)
+const ArrowBack = asMuiIcon(ArrowBackMuiIcon)
+const PersonIcon = asMuiIcon(PersonMuiIcon)
+const PrintIcon = asMuiIcon(PrintMuiIcon)
+const HistoryIcon = asMuiIcon(HistoryMuiIcon)
 
 class ErrorBoundary extends React.Component {
   constructor(props) {
@@ -123,7 +139,9 @@ function safeFormat(dateVal, fmtStr) {
 
 export default function PharmacyPortal() {
   useTimeDisplayMode()
-  const [view, setView] = useState('dashboard')
+  const nav = useNavigate()
+  const location = useLocation()
+  const { section: view, purchaseSubView, canonicalPath } = matchPharmacyPath(location.pathname)
   const [medicines, setMedicines] = useState([])
   const [batches, setBatches] = useState([])
   const [invoices, setInvoices] = useState([])
@@ -143,7 +161,6 @@ export default function PharmacyPortal() {
   const [outletSettings, setOutletSettings] = useState(null)
   const [billingPatient, setBillingPatient] = useState(null)
   const [draftInvoiceToLoad, setDraftInvoiceToLoad] = useState(null)
-  const [purchaseSubView, setPurchaseSubView] = useState('entry')
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 1200)
   const [settingsNavOpen, setSettingsNavOpen] = useState(true)
   const [settingsDirty, setSettingsDirty] = useState(false)
@@ -153,10 +170,16 @@ export default function PharmacyPortal() {
 
   const isSettingsView = (v) => v === 'settings_b2b' || v === 'settings_b2c'
 
-  const applyView = useCallback((next) => {
-    setView(next)
-    if (next !== 'purchase') setPurchaseSubView('entry')
-  }, [])
+  const goToSection = useCallback(
+    (nextSection, subView = null) => {
+      if (nextSection === 'purchase' && subView) {
+        nav(pathForPurchaseSubView(subView))
+      } else {
+        nav(pathForSection(nextSection))
+      }
+    },
+    [nav],
+  )
 
   const requestView = useCallback(
     (next) => {
@@ -164,10 +187,16 @@ export default function PharmacyPortal() {
         setPendingView(next)
         return
       }
-      applyView(next)
+      goToSection(next)
     },
-    [view, settingsDirty, applyView],
+    [view, settingsDirty, goToSection],
   )
+
+  useEffect(() => {
+    if (canonicalPath && location.pathname !== canonicalPath) {
+      nav(canonicalPath, { replace: true })
+    }
+  }, [location.pathname, canonicalPath, nav])
 
   const mergeCreatedMedicine = useCallback((med) => {
     if (!med?.id) return
@@ -181,6 +210,7 @@ export default function PharmacyPortal() {
   const fetchInitialData = useCallback(async () => {
     setLoading(true)
     try {
+      await ensurePharmacyBranchContext()
       const [medRows, batchRows, iResp, sResp] = await Promise.all([
         fetchAllPaginated('/medicines/'),
         fetchAllPaginated('/batches/'),
@@ -193,8 +223,8 @@ export default function PharmacyPortal() {
       const rawS = sResp.data
       const sd = normalizeOutletSettingsFromApi(rawS) || (rawS?.data ?? rawS?.entity)
       if (sd) setOutletSettings(sd)
-    } catch {
-      toast.error('Failed to load pharmacy data')
+    } catch (err) {
+      toast.error(err?.message || 'Failed to load pharmacy data')
     } finally {
       setLoading(false)
     }
@@ -277,6 +307,7 @@ export default function PharmacyPortal() {
             { id: 'inventory', label: 'Inventory', icon: Package },
             { id: 'categories', label: 'Categories', icon: Tags },
             { id: 'history', label: 'Register', icon: FileText },
+            { id: 'returns', label: 'Returns', icon: ReturnIcon },
           ].filter(Boolean).map((item) => (
             <button
               key={item.id}
@@ -369,7 +400,7 @@ export default function PharmacyPortal() {
                   <DraftsView
                     onLoadDraft={(draft) => {
                       setDraftInvoiceToLoad(draft)
-                      setView('billing')
+                      goToSection('billing')
                     }}
                     completedInvoices={invoices}
                     onViewInvoice={(inv) => setViewInvoiceId(inv.id)}
@@ -402,7 +433,7 @@ export default function PharmacyPortal() {
                   <div className="shrink-0 flex gap-1 bg-white border border-slate-200 rounded-lg p-1 w-fit">
                     <button
                       type="button"
-                      onClick={() => setPurchaseSubView('entry')}
+                      onClick={() => goToSection('purchase', 'entry')}
                       className={`px-3 py-1.5 rounded-md text-[11px] font-bold ${
                         purchaseSubView === 'entry' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                       }`}
@@ -411,7 +442,7 @@ export default function PharmacyPortal() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setPurchaseSubView('history')}
+                      onClick={() => goToSection('purchase', 'history')}
                       className={`px-3 py-1.5 rounded-md text-[11px] font-bold ${
                         purchaseSubView === 'history' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-50'
                       }`}
@@ -449,11 +480,21 @@ export default function PharmacyPortal() {
                 {view === 'history' && (
                   <HistoryView
                     invoices={invoices}
+                    medicines={medicines}
+                    batches={batches}
                     registerRefreshToken={registerRefreshToken}
                     onViewInvoice={(inv) => setViewInvoiceId(inv.id)}
                     onCancelInvoice={setCancelInvoice}
                     onViewInvoicePrint={(inv) => openInvoicePreview(inv, 'original')}
                     onViewInvoicePrinted={(inv) => openInvoicePreview(inv, 'printed')}
+                  />
+                )}
+              </ErrorBoundary>
+              <ErrorBoundary componentName="ReturnView">
+                {view === 'returns' && (
+                  <ReturnView
+                    outletSettings={outletSettings}
+                    onPrint={(inv) => openInvoicePreview(inv, 'original')}
                   />
                 )}
               </ErrorBoundary>
@@ -478,7 +519,7 @@ export default function PharmacyPortal() {
           settingsPanelRef.current?.discardChanges()
           const next = pendingView
           setPendingView(null)
-          if (next) applyView(next)
+          if (next) goToSection(next)
         }}
         onSave={async () => {
           setSettingsDialogSaving(true)
@@ -487,7 +528,7 @@ export default function PharmacyPortal() {
           if (ok) {
             const next = pendingView
             setPendingView(null)
-            if (next) applyView(next)
+            if (next) goToSection(next)
           }
         }}
       />
@@ -741,8 +782,10 @@ function formatStockLedgerLabel(r) {
 }
 
 function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialData, outletSettings }) {
+  const PAGE_SIZE = 15
   const [q, setQ] = useState('')
   const [invTab, setInvTab] = useState('all')
+  const [page, setPage] = useState(0)
   const [lowStockItems, setLowStockItems] = useState([])
   const [lowStockLoading, setLowStockLoading] = useState(false)
   const [allowNegative, setAllowNegative] = useState(() => localStorage.getItem(INV_ALLOW_NEG_KEY) === '1')
@@ -831,7 +874,28 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
     )
   })
 
-  const totalRows = filtered.length + medicinesWithoutBatch.length
+  const inventoryRows = useMemo(() => {
+    const rows = filtered.map((batch) => ({ kind: 'batch', batch }))
+    for (const medicine of medicinesWithoutBatch) {
+      rows.push({ kind: 'medicine', medicine })
+    }
+    return rows
+  }, [filtered, medicinesWithoutBatch])
+
+  const total = inventoryRows.length
+  const pagedInventoryRows = useMemo(
+    () => inventoryRows.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
+    [inventoryRows, page],
+  )
+
+  useEffect(() => {
+    setPage(0)
+  }, [q, invTab])
+
+  useEffect(() => {
+    const maxPage = Math.max(0, Math.ceil(total / PAGE_SIZE) - 1)
+    if (page > maxPage) setPage(maxPage)
+  }, [total, page])
 
   async function handleDeleteBatch(batch, med) {
     const medName = med?.name || productNameForBatch(batch, medicineById) || 'this item'
@@ -857,20 +921,26 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
         <div className="flex items-center gap-2">
           <h2 className="text-base font-bold text-slate-900">Inventory</h2>
           <span className="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
-            {totalRows} items
+            {invTab === 'low_stock' ? lowStockItems.length : total} items
           </span>
           {/* Tab bar */}
           <div className="flex items-center gap-0.5 ml-2 bg-slate-100 rounded-lg p-0.5">
             <button
               type="button"
-              onClick={() => setInvTab('all')}
+              onClick={() => {
+                setInvTab('all')
+                setPage(0)
+              }}
               className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-colors ${invTab === 'all' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
             >
               All
             </button>
             <button
               type="button"
-              onClick={() => setInvTab('low_stock')}
+              onClick={() => {
+                setInvTab('low_stock')
+                setPage(0)
+              }}
               className={`px-3 py-1 rounded-md text-[11px] font-semibold transition-colors flex items-center gap-1 ${invTab === 'low_stock' ? 'bg-white text-amber-700 shadow-sm' : 'text-slate-500 hover:text-amber-600'}`}
             >
               <span className="inline-block w-1.5 h-1.5 rounded-full bg-amber-500" />
@@ -963,7 +1033,10 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
           <Search size={14} className="text-slate-400 shrink-0" />
           <input
             value={q}
-            onChange={(e) => setQ(e.target.value)}
+            onChange={(e) => {
+              setPage(0)
+              setQ(e.target.value)
+            }}
             placeholder="Search name / batch (includes products with no batch)"
             className="flex-1 bg-transparent text-[12px] font-medium outline-none min-w-0"
           />
@@ -984,122 +1057,127 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filtered.map((b) => {
-                const med = medicineForBatch(b, medicineById)
-                const productName = productNameForBatch(b, medicineById)
-                const { baseLabel, packLabel, perPack } = inventoryQtyLabels(med, medicineCategoryRows)
-                const qty = Number(b.quantity ?? 0)
-                const stockLabel = formatPackAndBaseStock(qty, perPack, packLabel, baseLabel)
-                const low = isLowStockRow(qty, outletSettings?.low_stock_threshold)
-                const expCls = expiryRowClass(b.expiry_date)
+              {pagedInventoryRows.map((row) => {
+                if (row.kind === 'batch') {
+                  const b = row.batch
+                  const med = medicineForBatch(b, medicineById)
+                  const productName = productNameForBatch(b, medicineById)
+                  const { baseLabel, packLabel, perPack } = inventoryQtyLabels(med, medicineCategoryRows)
+                  const qty = Number(b.quantity ?? 0)
+                  const stockLabel = formatPackAndBaseStock(qty, perPack, packLabel, baseLabel)
+                  const low = isLowStockRow(qty, outletSettings?.low_stock_threshold)
+                  const expCls = expiryRowClass(b.expiry_date)
+                  return (
+                    <tr
+                      key={b.id}
+                      className={`hover:bg-slate-50 ${low ? 'bg-amber-50/50' : ''} ${qty < 0 ? 'bg-rose-50/70' : ''}`}
+                    >
+                      <td className="px-2 py-1 align-top min-w-0">
+                        <div className="font-semibold text-slate-900 truncate" title={productName}>
+                          {productName}
+                        </div>
+                        <div className="text-[10px] text-slate-400 truncate">{med?.pack_info}</div>
+                      </td>
+                      <td className="px-2 py-1 align-top min-w-0 text-[10px] text-slate-600 truncate" title={categoryPathForMedicine(med)}>
+                        {categoryPathForMedicine(med)}
+                      </td>
+                      <td className="px-2 py-1 align-top min-w-0">
+                        <span className="font-mono text-[10px] bg-slate-100 px-1 py-0.5 rounded inline-block max-w-full truncate" title={b.batch_no}>
+                          {b.batch_no}
+                        </span>
+                      </td>
+                      <td className={`px-2 py-1 align-top tabular-nums ${expCls}`}>{safeFormat(b.expiry_date, 'MM/yy')}</td>
+                      <td className="px-2 py-1 align-top text-emerald-800 font-medium leading-tight break-words">
+                        <div>{stockLabel}</div>
+                        {perPack > 1 && (
+                          <div className="text-[9px] text-slate-400 font-mono tabular-nums">
+                            {qty % 1 === 0 ? qty : qty.toFixed(2)} {baseLabel} (base)
+                          </div>
+                        )}
+                        {qty < 0 && <div className="text-[9px] text-rose-600 font-semibold">Below zero</div>}
+                        {low && qty >= 0 && <div className="text-[9px] text-amber-700">Low stock</div>}
+                      </td>
+                      <td className="px-2 py-1 text-right tabular-nums text-slate-700">₹{Number(b.mrp ?? 0).toFixed(2)}</td>
+                      <td className="px-2 py-1 text-right tabular-nums text-blue-700 font-semibold">₹{Number(b.sale_rate ?? 0).toFixed(2)}</td>
+                      <td className="px-2 py-1 text-right tabular-nums text-slate-500">₹{Number(b.unit_cost ?? 0).toFixed(2)}</td>
+                      <td className="px-1 py-1 align-top">
+                        <div className="flex flex-wrap items-center justify-center gap-1">
+                          <button
+                            type="button"
+                            title="View details"
+                            onClick={() => setDetailBatch({ batch: b, medicine: med })}
+                            className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
+                          >
+                            <Eye size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Edit rate"
+                            onClick={() => setRateBatch({ batch: b, medicine: med })}
+                            className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
+                          >
+                            <PencilLine size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Adjust stock"
+                            onClick={() => setAdjustBatch({ batch: b, medicine: med })}
+                            className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
+                          >
+                            <SlidersHorizontal size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            title="Delete inventory"
+                            disabled={deletingBatchId === String(b.id)}
+                            onClick={() => handleDeleteBatch(b, med)}
+                            className="p-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                }
+
+                const m = row.medicine
                 return (
-                  <tr
-                    key={b.id}
-                    className={`hover:bg-slate-50 ${low ? 'bg-amber-50/50' : ''} ${qty < 0 ? 'bg-rose-50/70' : ''}`}
-                  >
+                  <tr key={`no-batch-${m.id}`} className="bg-sky-50/30 hover:bg-sky-50/60">
                     <td className="px-2 py-1 align-top min-w-0">
-                      <div className="font-semibold text-slate-900 truncate" title={productName}>
-                        {productName}
+                      <div className="font-semibold text-slate-900 truncate" title={m.name}>
+                        {m.name || '—'}
                       </div>
-                      <div className="text-[10px] text-slate-400 truncate">{med?.pack_info}</div>
+                      <div className="text-[10px] text-slate-400 truncate">{m.pack_info}</div>
                     </td>
-                    <td className="px-2 py-1 align-top min-w-0 text-[10px] text-slate-600 truncate" title={categoryPathForMedicine(med)}>
-                      {categoryPathForMedicine(med)}
+                    <td className="px-2 py-1 align-top min-w-0 text-[10px] text-slate-600 truncate" title={categoryPathForMedicine(m)}>
+                      {categoryPathForMedicine(m)}
                     </td>
-                    <td className="px-2 py-1 align-top min-w-0">
-                      <span className="font-mono text-[10px] bg-slate-100 px-1 py-0.5 rounded inline-block max-w-full truncate" title={b.batch_no}>
-                        {b.batch_no}
+                    <td className="px-2 py-1 align-top text-[10px]">
+                      <span className="inline-block rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-semibold">
+                        No batch
                       </span>
                     </td>
-                    <td className={`px-2 py-1 align-top tabular-nums ${expCls}`}>{safeFormat(b.expiry_date, 'MM/yy')}</td>
-                    <td className="px-2 py-1 align-top text-emerald-800 font-medium leading-tight break-words">
-                      <div>{stockLabel}</div>
-                      {perPack > 1 && (
-                        <div className="text-[9px] text-slate-400 font-mono tabular-nums">
-                          {qty % 1 === 0 ? qty : qty.toFixed(2)} {baseLabel} (base)
-                        </div>
-                      )}
-                      {qty < 0 && <div className="text-[9px] text-rose-600 font-semibold">Below zero</div>}
-                      {low && qty >= 0 && <div className="text-[9px] text-amber-700">Low stock</div>}
-                    </td>
-                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">₹{Number(b.mrp ?? 0).toFixed(2)}</td>
-                    <td className="px-2 py-1 text-right tabular-nums text-blue-700 font-semibold">₹{Number(b.sale_rate ?? 0).toFixed(2)}</td>
-                    <td className="px-2 py-1 text-right tabular-nums text-slate-500">₹{Number(b.unit_cost ?? 0).toFixed(2)}</td>
+                    <td className="px-2 py-1 align-top text-slate-400">--/--</td>
+                    <td className="px-2 py-1 align-top text-slate-500">Add batch to start stock</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-slate-700">₹{Number(m.default_mrp ?? 0).toFixed(2)}</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-slate-500">₹0.00</td>
+                    <td className="px-2 py-1 text-right tabular-nums text-slate-500">₹0.00</td>
                     <td className="px-1 py-1 align-top">
-                      <div className="flex flex-wrap items-center justify-center gap-1">
+                      <div className="flex items-center justify-center">
                         <button
                           type="button"
-                          title="View details"
-                          onClick={() => setDetailBatch({ batch: b, medicine: med })}
-                          className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
+                          onClick={() => toast('Create purchase/batch entry for this medicine')}
+                          className="px-2 py-1 rounded border border-blue-200 bg-white text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
                         >
-                          <Eye size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          title="Edit rate"
-                          onClick={() => setRateBatch({ batch: b, medicine: med })}
-                          className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
-                        >
-                          <PencilLine size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          title="Adjust stock"
-                          onClick={() => setAdjustBatch({ batch: b, medicine: med })}
-                          className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
-                        >
-                          <SlidersHorizontal size={12} />
-                        </button>
-                        <button
-                          type="button"
-                          title="Delete inventory"
-                          disabled={deletingBatchId === String(b.id)}
-                          onClick={() => handleDeleteBatch(b, med)}
-                          className="p-1 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                          <Trash2 size={12} />
+                          Add Batch
                         </button>
                       </div>
                     </td>
                   </tr>
                 )
               })}
-              {medicinesWithoutBatch.map((m) => (
-                <tr key={`no-batch-${m.id}`} className="bg-sky-50/30 hover:bg-sky-50/60">
-                  <td className="px-2 py-1 align-top min-w-0">
-                    <div className="font-semibold text-slate-900 truncate" title={m.name}>
-                      {m.name || '—'}
-                    </div>
-                    <div className="text-[10px] text-slate-400 truncate">{m.pack_info}</div>
-                  </td>
-                  <td className="px-2 py-1 align-top min-w-0 text-[10px] text-slate-600 truncate" title={categoryPathForMedicine(m)}>
-                    {categoryPathForMedicine(m)}
-                  </td>
-                  <td className="px-2 py-1 align-top text-[10px]">
-                    <span className="inline-block rounded bg-amber-100 text-amber-800 px-1.5 py-0.5 font-semibold">
-                      No batch
-                    </span>
-                  </td>
-                  <td className="px-2 py-1 align-top text-slate-400">--/--</td>
-                  <td className="px-2 py-1 align-top text-slate-500">Add batch to start stock</td>
-                  <td className="px-2 py-1 text-right tabular-nums text-slate-700">₹{Number(m.default_mrp ?? 0).toFixed(2)}</td>
-                  <td className="px-2 py-1 text-right tabular-nums text-slate-500">₹0.00</td>
-                  <td className="px-2 py-1 text-right tabular-nums text-slate-500">₹0.00</td>
-                  <td className="px-1 py-1 align-top">
-                    <div className="flex items-center justify-center">
-                      <button
-                        type="button"
-                        onClick={() => toast('Create purchase/batch entry for this medicine')}
-                        className="px-2 py-1 rounded border border-blue-200 bg-white text-[10px] font-semibold text-blue-700 hover:bg-blue-50"
-                      >
-                        Add Batch
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && medicinesWithoutBatch.length === 0 && (
+              {total === 0 && (
                 <tr>
                   <td colSpan={9} className="px-2 py-6 text-center text-[11px] text-slate-500">
                     No inventory records found.
@@ -1108,6 +1186,29 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
               )}
             </tbody>
           </table>
+        </div>
+        <div className="shrink-0 flex items-center justify-between text-xs text-slate-600 px-3 py-2 border-t border-slate-100 bg-slate-50/70">
+          <span>
+            {total === 0 ? 'No records' : `Showing ${page * PAGE_SIZE + 1}-${Math.min((page + 1) * PAGE_SIZE, total)} of ${total}`}
+          </span>
+          <div className="flex gap-1">
+            <button
+              type="button"
+              disabled={page === 0}
+              onClick={() => setPage((p) => Math.max(0, p - 1))}
+              className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <button
+              type="button"
+              disabled={(page + 1) * PAGE_SIZE >= total}
+              onClick={() => setPage((p) => p + 1)}
+              className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
       )}
@@ -1251,11 +1352,45 @@ function InventoryBatchDetailModal({ batch, medicine, medicineCategoryRows = [],
 }
 
 function InventoryEditRateModal({ batch, medicine, customCategories = [], onClose, onSaved }) {
+  // Pack size for unit ↔ strip conversion
+  const { perPack: packSize, label: packLabel } = preferredPackFromConversions(medicine?.unit_conversions)
+
+  // Per-unit → display value in the currently selected pricing mode
+  function toDisplay(unitVal, mode, ps) {
+    const n = Number(unitVal) || 0
+    return mode === 'strip' && ps > 1 ? (n * ps).toFixed(2) : n.toFixed(2)
+  }
+
+  // Display value → per-unit value for saving
+  function toUnit(displayVal, mode, ps) {
+    const n = Number(displayVal) || 0
+    return mode === 'strip' && ps > 1 ? n / ps : n
+  }
+
+  const [pricingMode, setPricingMode] = useState(
+    () => localStorage.getItem('inventory_pricing_mode') || 'unit'
+  )
+
   const [nickname, setNickname] = useState(String(medicine?.name ?? ''))
   const [nameOnBill, setNameOnBill] = useState(String(medicine?.name_on_bill ?? ''))
-  const [mrp, setMrp] = useState(String(batch.mrp ?? ''))
-  const [sale, setSale] = useState(String(batch.sale_rate ?? ''))
+  const [mrp, setMrp] = useState(() => toDisplay(batch.mrp ?? 0, localStorage.getItem('inventory_pricing_mode') || 'unit', packSize))
+  const [sale, setSale] = useState(() => toDisplay(batch.sale_rate ?? 0, localStorage.getItem('inventory_pricing_mode') || 'unit', packSize))
+  const [cost, setCost] = useState(() => toDisplay(batch.unit_cost ?? 0, localStorage.getItem('inventory_pricing_mode') || 'unit', packSize))
   const [saving, setSaving] = useState(false)
+
+  function switchPricingMode(newMode) {
+    if (newMode === pricingMode) return
+    // Convert currently displayed values to the new mode
+    setMrp(toDisplay(toUnit(mrp, pricingMode, packSize), newMode, packSize))
+    setSale(toDisplay(toUnit(sale, pricingMode, packSize), newMode, packSize))
+    setCost(toDisplay(toUnit(cost, pricingMode, packSize), newMode, packSize))
+    setPricingMode(newMode)
+    localStorage.setItem('inventory_pricing_mode', newMode)
+  }
+
+  const priceLabel = pricingMode === 'strip' && packSize > 1
+    ? `₹ / ${packLabel || 'strip'}`
+    : '₹'
 
   // Category picker state — mirrors AddMedicineModal
   const [pickerOpen, setPickerOpen] = useState(false)
@@ -1340,8 +1475,9 @@ function InventoryEditRateModal({ batch, medicine, customCategories = [], onClos
     setSaving(true)
     try {
       await api.patch(`/batches/${batch.id}/`, {
-        mrp: Number(mrp) || 0,
-        sale_rate: Number(sale) || 0,
+        mrp:       toUnit(mrp,  pricingMode, packSize),
+        sale_rate: toUnit(sale, pricingMode, packSize),
+        unit_cost: toUnit(cost, pricingMode, packSize),
       })
       const leafId = categoryPathIds.length ? categoryPathIds[categoryPathIds.length - 1] : null
       await api.patch(`/medicines/${medicine.id}/`, {
@@ -1397,12 +1533,38 @@ function InventoryEditRateModal({ batch, medicine, customCategories = [], onClos
 
         {/* Rates */}
         <div>
-          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Rates</p>
+          <div className="flex items-center justify-between mb-1.5">
+            <p className="text-[9px] font-bold text-slate-500 uppercase tracking-wide">Rates</p>
+            {packSize > 1 && (
+              <div className="flex gap-0.5 bg-slate-100 border border-slate-200 rounded p-0.5">
+                <button
+                  type="button"
+                  onClick={() => switchPricingMode('unit')}
+                  className={`px-2 py-0.5 rounded text-[9px] font-bold transition-colors ${
+                    pricingMode === 'unit' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  Unit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchPricingMode('strip')}
+                  className={`px-2 py-0.5 rounded text-[9px] font-bold transition-colors capitalize ${
+                    pricingMode === 'strip' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {packLabel || 'Strip'}
+                </button>
+              </div>
+            )}
+          </div>
           <p className="text-[9px] text-amber-800 bg-amber-50 border border-amber-100 rounded px-1.5 py-1 mb-2">
-            Stock, batch, expiry and purchase cost come from purchase / system.
+            {packSize > 1 && pricingMode === 'strip'
+              ? `Prices per ${packLabel || 'strip'} (${packSize} units). Saved as per-unit.`
+              : 'Stock, batch and expiry come from purchase / system.'}
           </p>
           <label className="block mb-2">
-            <span className="text-[9px] font-semibold text-slate-600">MRP (₹)</span>
+            <span className="text-[9px] font-semibold text-slate-600">MRP ({priceLabel})</span>
             <input
               value={mrp}
               onChange={(e) => setMrp(e.target.value)}
@@ -1410,11 +1572,20 @@ function InventoryEditRateModal({ batch, medicine, customCategories = [], onClos
               inputMode="decimal"
             />
           </label>
-          <label className="block">
-            <span className="text-[9px] font-semibold text-slate-600">Sale rate (₹)</span>
+          <label className="block mb-2">
+            <span className="text-[9px] font-semibold text-slate-600">Sale rate ({priceLabel})</span>
             <input
               value={sale}
               onChange={(e) => setSale(e.target.value)}
+              className="mt-0.5 w-full border border-slate-200 rounded px-2 py-1 text-xs tabular-nums"
+              inputMode="decimal"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[9px] font-semibold text-slate-600">Cost price ({priceLabel})</span>
+            <input
+              value={cost}
+              onChange={(e) => setCost(e.target.value)}
               className="mt-0.5 w-full border border-slate-200 rounded px-2 py-1 text-xs tabular-nums"
               inputMode="decimal"
             />
@@ -1740,6 +1911,8 @@ function InventoryAdjustStockModal({ batch, medicine, medicineCategoryRows = [],
 
 function HistoryView({
   invoices: _invoices,
+  medicines: portalMedicines = [],
+  batches: portalBatches = [],
   registerRefreshToken = 0,
   onViewInvoice,
   onCancelInvoice,
@@ -1757,6 +1930,9 @@ function HistoryView({
   const [pendingRows, setPendingRows] = useState([])
   const [pendingMeta, setPendingMeta] = useState({ total_pending_amount: '0.00', total_patients: 0 })
   const [pendingLoading, setPendingLoading] = useState(false)
+  const [clearCreditBill, setClearCreditBill] = useState(null)
+  const [clearPaymentMethod, setClearPaymentMethod] = useState('cash')
+  const [clearingCredit, setClearingCredit] = useState(false)
 
   const fetchRows = useCallback(async () => {
     setLoading(true)
@@ -1802,6 +1978,24 @@ function HistoryView({
   useEffect(() => {
     if (subView === 'pending') fetchPendingRows()
   }, [fetchPendingRows, subView])
+
+  const confirmClearCredit = useCallback(async () => {
+    if (!clearCreditBill?.bill?.id) return
+    setClearingCredit(true)
+    try {
+      await api.post(`/pharmacy/invoices/${clearCreditBill.bill.id}/clear-credit/`, {
+        payment_method: clearPaymentMethod,
+      })
+      toast.success('Pending credit cleared')
+      setClearCreditBill(null)
+      setClearPaymentMethod('cash')
+      fetchPendingRows()
+    } catch (err) {
+      toast.error(parseApiError(err, 'Failed to clear pending credit'))
+    } finally {
+      setClearingCredit(false)
+    }
+  }, [clearCreditBill, clearPaymentMethod, fetchPendingRows])
 
   return (
     <div className="h-full flex flex-col gap-3 overflow-hidden min-h-0 bg-gradient-to-br from-slate-50 via-white to-indigo-50/40 rounded-xl p-3">
@@ -1994,6 +2188,7 @@ function HistoryView({
                           <th className="px-3 py-2 text-right">Total</th>
                           <th className="px-3 py-2 text-right">Paid</th>
                           <th className="px-3 py-2 text-right">Due</th>
+                          <th className="px-3 py-2 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
@@ -2005,6 +2200,22 @@ function HistoryView({
                             <td className="px-3 py-2 text-right">₹{Number(bill.paid_amount || 0).toFixed(2)}</td>
                             <td className="px-3 py-2 text-right font-semibold text-amber-700">
                               ₹{Number(bill.due_amount || 0).toFixed(2)}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setClearPaymentMethod('cash')
+                                  setClearCreditBill({
+                                    bill,
+                                    patientName: pt.patient_name,
+                                    patientUhid: pt.uhid,
+                                  })
+                                }}
+                                className="px-2 py-1 rounded-md text-[10px] font-bold bg-emerald-600 text-white hover:bg-emerald-700"
+                              >
+                                Clear due
+                              </button>
                             </td>
                           </tr>
                         ))}
@@ -2051,6 +2262,8 @@ function HistoryView({
       {editInv ? (
         <EditSaleInvoiceModal
           invoice={editInv}
+          initialMedicines={portalMedicines}
+          initialBatches={portalBatches}
           onClose={() => setEditInv(null)}
           onSaved={() => {
             setEditInv(null)
@@ -2058,16 +2271,124 @@ function HistoryView({
           }}
         />
       ) : null}
+
+      {clearCreditBill ? (
+        <div className="fixed inset-0 z-[1200] flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm"
+            onClick={() => { if (!clearingCredit) setClearCreditBill(null) }}
+          />
+          <div className="relative z-10 bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            <div className="px-4 py-3 bg-emerald-600 text-white flex items-center justify-between">
+              <h3 className="font-bold text-sm">Clear pending credit</h3>
+              <button
+                type="button"
+                onClick={() => { if (!clearingCredit) setClearCreditBill(null) }}
+                className="text-white/80 hover:text-white"
+                disabled={clearingCredit}
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-sm text-slate-700">
+                Clear pending credit for invoice{' '}
+                <span className="font-bold text-slate-900">#{clearCreditBill.bill.invoice_no}</span>
+                {' '}of patient{' '}
+                <span className="font-semibold">{clearCreditBill.patientName}</span>
+                {clearCreditBill.patientUhid ? ` (${clearCreditBill.patientUhid})` : ''}?
+              </p>
+              <p className="text-sm font-semibold text-amber-700">
+                Due amount: ₹{Number(clearCreditBill.bill.due_amount || 0).toFixed(2)}
+              </p>
+              <label className="block">
+                <span className="text-[10px] font-semibold text-slate-500 uppercase">Payment method</span>
+                <select
+                  value={clearPaymentMethod}
+                  onChange={(e) => setClearPaymentMethod(e.target.value)}
+                  disabled={clearingCredit}
+                  className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white"
+                >
+                  <option value="cash">Cash</option>
+                  <option value="upi">UPI</option>
+                  <option value="card">Card</option>
+                  <option value="bank_transfer">Bank transfer</option>
+                  <option value="other">Other</option>
+                </select>
+              </label>
+              <p className="text-xs text-slate-500">
+                This will mark the bill as fully paid and remove it from the pending credit list.
+              </p>
+              <div className="flex justify-end gap-2 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setClearCreditBill(null)}
+                  disabled={clearingCredit}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmClearCredit}
+                  disabled={clearingCredit}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  {clearingCredit ? 'Clearing…' : 'Yes, clear due'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   )
 }
 
-function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
+function patientDisplayName(p) {
+  if (!p) return ''
+  return [p.first_name, p.middle_name, p.last_name].filter(Boolean).join(' ').trim()
+}
+
+function invoiceDateTimeInputToIso(dateValue, timeValue) {
+  if (!dateValue) return null
+  const normalizedTime = timeValue || '00:00'
+  const d = new Date(`${dateValue}T${normalizedTime}`)
+  if (Number.isNaN(d.getTime())) return null
+  return d.toISOString()
+}
+
+function invoiceInstantParts(value) {
+  const d = value ? new Date(value) : new Date()
+  if (Number.isNaN(d.getTime())) {
+    const now = new Date()
+    return { date: format(now, 'yyyy-MM-dd'), time: format(now, 'HH:mm') }
+  }
+  return { date: format(d, 'yyyy-MM-dd'), time: format(d, 'HH:mm') }
+}
+
+const EDIT_PAYMENT_METHODS = [
+  { value: 'cash', label: 'Cash' },
+  { value: 'upi', label: 'UPI' },
+  { value: 'card', label: 'Card' },
+  { value: 'bank_transfer', label: 'Bank transfer' },
+  { value: 'other', label: 'Other' },
+  { value: 'credit', label: 'Credit' },
+]
+
+function EditSaleInvoiceModal({ invoice, onClose, onSaved, initialMedicines = [], initialBatches = [] }) {
   const patientInfo = invoice?.patient_details || {}
-  const initialName = [patientInfo.first_name, patientInfo.last_name].filter(Boolean).join(' ').trim()
+  const initialName = patientDisplayName(patientInfo)
   const [paymentMethod, setPaymentMethod] = useState(invoice.payment_method || 'cash')
   const [paidAmount, setPaidAmount] = useState(String(invoice.paid_amount ?? invoice.grand_total ?? '0'))
   const [remarks, setRemarks] = useState(invoice.remarks || '')
+  const initialDiscount = Number(invoice.total_discount || 0)
+  const [discountInput, setDiscountInput] = useState(initialDiscount > 0 ? String(initialDiscount) : '')
+  const [afterDiscountInput, setAfterDiscountInput] = useState(() => {
+    const after = Number(invoice.grand_total || 0)
+    return after > 0 ? String(after) : ''
+  })
+  const [discountLastEdited, setDiscountLastEdited] = useState('discount')
   const [settlementType, setSettlementType] = useState(() => {
     const due = Number(invoice.due_amount ?? (Number(invoice.grand_total || 0) - Number(invoice.paid_amount || 0)))
     return due > 0 ? 'due' : 'paid'
@@ -2075,13 +2396,26 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
   const [patientName, setPatientName] = useState(initialName)
   const [patientPhone, setPatientPhone] = useState(patientInfo.phone || '')
   const [patientGender, setPatientGender] = useState(patientInfo.gender || 'male')
-  const [patientAge, setPatientAge] = useState(patientInfo.age != null ? String(patientInfo.age) : '')
+  const [patientAge, setPatientAge] = useState(
+    patientInfo.age_value != null ? String(patientInfo.age_value) : patientInfo.age != null ? String(patientInfo.age) : '',
+  )
+  const [patientAgeUnit, setPatientAgeUnit] = useState(patientInfo.age_unit || 'years')
   const [guardianName, setGuardianName] = useState(patientInfo.guardian_name || '')
   const [addressLine1, setAddressLine1] = useState(patientInfo.address_line1 || '')
   const [city, setCity] = useState(patientInfo.city || '')
   const [state, setState] = useState(patientInfo.state || '')
-  const [medicines, setMedicines] = useState([])
-  const [batches, setBatches] = useState([])
+  const [doctorName, setDoctorName] = useState(invoice.billing_doctor_name || '')
+  const [hospitalName, setHospitalName] = useState(invoice.billing_hospital_name || '')
+  const initialWhen = invoiceInstantParts(invoice.created_at)
+  const [invoiceDate, setInvoiceDate] = useState(initialWhen.date)
+  const [invoiceTime, setInvoiceTime] = useState(initialWhen.time)
+  const [linkedPatientId, setLinkedPatientId] = useState(patientInfo.id || invoice.patient || '')
+  const [linkedUhid, setLinkedUhid] = useState(patientInfo.uhid || '')
+  const [ptResults, setPtResults] = useState([])
+  const [ptSearching, setPtSearching] = useState(false)
+  const [showPtResults, setShowPtResults] = useState(false)
+  const [medicines, setMedicines] = useState(() => (Array.isArray(initialMedicines) ? initialMedicines : []))
+  const [batches, setBatches] = useState(() => (Array.isArray(initialBatches) ? initialBatches : []))
   const [items, setItems] = useState(() =>
     Array.isArray(invoice.items) && invoice.items.length > 0
       ? invoice.items.map((it) => ({
@@ -2098,25 +2432,93 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
   )
   const [saving, setSaving] = useState(false)
 
+  // Refresh both lists independently: /batches/ computes live stock per row and can take
+  // ~10s, and waiting on it used to leave every medicine dropdown blank until it landed.
   useEffect(() => {
     let cancelled = false
-    Promise.all([
-      api.get('/medicines/?limit=2000').catch(() => ({ data: [] })),
-      api.get('/batches/?limit=4000').catch(() => ({ data: [] })),
-    ]).then(([mRes, bRes]) => {
-      if (cancelled) return
-      setMedicines(mRes.data?.data || mRes.data?.results || [])
-      setBatches(bRes.data?.data || bRes.data?.results || [])
-    })
+    fetchAllPaginated('/medicines/')
+      .then((rows) => {
+        if (!cancelled && rows.length) setMedicines(rows)
+      })
+      .catch(() => {})
+    fetchAllPaginated('/batches/')
+      .then((rows) => {
+        if (!cancelled && rows.length) setBatches(rows)
+      })
+      .catch(() => {})
     return () => {
       cancelled = true
     }
   }, [])
 
+  // The bill itself carries the medicine / batch labels, so a row can always name what it
+  // sold even before the master lists arrive (or if the product was later deactivated).
+  const invoiceItemLabels = useMemo(() => {
+    const meds = new Map()
+    const batchNos = new Map()
+    for (const it of Array.isArray(invoice.items) ? invoice.items : []) {
+      const medId = String(it.medicine || '')
+      if (medId && !meds.has(medId)) meds.set(medId, String(it.medicine_name || '').trim() || 'Medicine')
+      const batchId = String(it.batch || '')
+      if (batchId && !batchNos.has(batchId)) {
+        batchNos.set(batchId, String(it.batch_no || it.snapshot_batch_no || '').trim() || 'Batch')
+      }
+    }
+    return { meds, batchNos }
+  }, [invoice.items])
+
+  useEffect(() => {
+    const term = String(patientName || '').trim()
+    if (term.length < 2) {
+      setPtResults([])
+      setPtSearching(false)
+      return undefined
+    }
+    let cancelled = false
+    setPtSearching(true)
+    const timer = setTimeout(() => {
+      api
+        .get(`/patients/?search=${encodeURIComponent(term)}&limit=8`)
+        .then((res) => {
+          if (cancelled) return
+          const rows = res.data?.data || res.data?.results || []
+          setPtResults(Array.isArray(rows) ? rows : [])
+        })
+        .catch(() => {
+          if (!cancelled) setPtResults([])
+        })
+        .finally(() => {
+          if (!cancelled) setPtSearching(false)
+        })
+    }, 280)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [patientName])
+
+  function applyExistingPatient(p) {
+    if (!p) return
+    setLinkedPatientId(p.id)
+    setLinkedUhid(p.uhid || '')
+    setPatientName(patientDisplayName(p))
+    setPatientPhone(p.phone || '')
+    setPatientGender(p.gender || 'male')
+    setPatientAge(p.age_value != null ? String(p.age_value) : p.age != null ? String(p.age) : '')
+    setPatientAgeUnit(p.age_unit || 'years')
+    setGuardianName(p.guardian_name || '')
+    setAddressLine1(p.address_line1 || '')
+    setCity(p.city || '')
+    setState(p.state || '')
+    setPtResults([])
+    setShowPtResults(false)
+  }
+
   const totals = useMemo(() => {
     let subtotal = 0
     let cgst = 0
     let sgst = 0
+    let rawMargin = 0
     items.forEach((row) => {
       const qty = Number(row.qty || 0)
       const rate = Number(row.rate || 0)
@@ -2126,12 +2528,37 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
       subtotal += base
       cgst += (base * cg) / 100
       sgst += (base * sg) / 100
+      const batch = batches.find((b) => String(b.id) === String(row.batch))
+      const unitCost = batch && Number(batch.unit_cost) > 0 ? Number(batch.unit_cost) : null
+      if (unitCost != null) {
+        rawMargin += (rate - unitCost) * qty
+      }
     })
     const grandTotal = subtotal + cgst + sgst
+    let safeDiscount
+    let afterDiscount
+    if (discountLastEdited === 'after') {
+      const afterVal = afterDiscountInput === '' || afterDiscountInput === '.'
+        ? grandTotal
+        : Math.max(0, Math.min(Number(afterDiscountInput) || 0, grandTotal))
+      afterDiscount = afterVal
+      safeDiscount = Math.max(0, grandTotal - afterVal)
+    } else {
+      safeDiscount = discountInput === '' || discountInput === '.'
+        ? 0
+        : Math.max(0, Math.min(Number(discountInput) || 0, grandTotal))
+      afterDiscount = Math.max(0, grandTotal - safeDiscount)
+    }
+    const discountRatio = grandTotal > 0 ? afterDiscount / grandTotal : 1
+    const margin = rawMargin * discountRatio
+    // Retail bills settle in whole rupees; party (B2B / GST) bills stay exact.
+    const { payable, roundOff } = invoice?.party
+      ? { payable: afterDiscount, roundOff: 0 }
+      : computeInvoiceRoundOff(afterDiscount)
     const paid = paymentMethod === 'credit' ? 0 : Number(paidAmount || 0)
-    const due = Math.max(0, grandTotal - Math.max(0, paid))
-    return { subtotal, cgst, sgst, grandTotal, due }
-  }, [items, paymentMethod, paidAmount])
+    const due = Math.max(0, payable - Math.max(0, paid))
+    return { subtotal, cgst, sgst, grandTotal, discount: safeDiscount, afterDiscount, roundOff, payable, due, rawMargin, margin }
+  }, [items, batches, paymentMethod, paidAmount, discountInput, afterDiscountInput, discountLastEdited, invoice?.party])
 
   useEffect(() => {
     if (settlementType === 'due') {
@@ -2142,9 +2569,9 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
         setPaymentMethod('cash')
       }
       // For "Paid", always use the latest recalculated edited bill total.
-      setPaidAmount(String((totals?.grandTotal || 0).toFixed(2)))
+      setPaidAmount(String((totals?.payable || 0).toFixed(2)))
     }
-  }, [settlementType, paymentMethod, totals?.grandTotal])
+  }, [settlementType, paymentMethod, totals?.payable])
 
   function updateItem(index, patch) {
     setItems((prev) => prev.map((row, i) => (i === index ? { ...row, ...patch } : row)))
@@ -2225,13 +2652,16 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
 
     setSaving(true)
     try {
+      const invoiceDatetimeIso = invoiceDateTimeInputToIso(invoiceDate, invoiceTime)
       await api.patch(`/pharmacy/invoices/${invoice.id}/update-full/`, {
         patient: {
+          id: linkedPatientId || undefined,
           first_name: parts[0],
           last_name: parts.slice(1).join(' '),
           phone: patientPhone || '',
           gender: patientGender || 'male',
           age: patientAge === '' ? null : Number(patientAge),
+          age_unit: patientAgeUnit || 'years',
           guardian_name: guardianName || '',
           address_line1: addressLine1 || '',
           city: city || '',
@@ -2239,9 +2669,13 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
         },
         invoice: {
           payment_method: settlementType === 'due' ? 'credit' : paymentMethod,
-          paid_amount: settlementType === 'due' ? 0 : Number(totals.grandTotal || 0),
+          paid_amount: settlementType === 'due' ? 0 : Number(totals.payable || 0),
           remarks,
-          total_discount: Number(invoice.total_discount || 0),
+          total_discount: Number(totals.discount || 0),
+          date: invoiceDate || undefined,
+          ...(invoiceDatetimeIso ? { invoice_datetime: invoiceDatetimeIso } : {}),
+          billing_doctor_name: doctorName || '',
+          billing_hospital_name: hospitalName || '',
         },
         items: validItems,
       })
@@ -2265,9 +2699,47 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
         </div>
         <div className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <label className="block">
+            <label className="block relative">
               <span className="text-[10px] font-semibold text-slate-500 uppercase">Patient name</span>
-              <input value={patientName} onChange={(e) => setPatientName(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+              <input
+                value={patientName}
+                onChange={(e) => {
+                  setPatientName(e.target.value)
+                  setShowPtResults(true)
+                }}
+                onFocus={() => setShowPtResults(true)}
+                onBlur={() => window.setTimeout(() => setShowPtResults(false), 180)}
+                placeholder="Search existing patient or type a name"
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+              />
+              {linkedUhid ? (
+                <p className="text-[10px] text-emerald-700 font-semibold mt-0.5">UHID {linkedUhid} — linked hospital patient</p>
+              ) : (
+                <p className="text-[10px] text-slate-400 mt-0.5">Pick a match below, or fill the fields manually</p>
+              )}
+              {showPtResults && String(patientName || '').trim().length >= 2 && (
+                <div className="absolute z-30 left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                  {ptSearching && (
+                    <div className="px-3 py-2 text-xs text-slate-400">Searching…</div>
+                  )}
+                  {!ptSearching && ptResults.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-slate-500">No existing patient found. Continue typing to fill manually.</div>
+                  )}
+                  {ptResults.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => applyExistingPatient(p)}
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-emerald-50 border-b border-slate-100 last:border-0"
+                    >
+                      <span className="font-semibold text-slate-900">{patientDisplayName(p) || '—'}</span>
+                      {p.uhid ? <span className="ml-2 text-slate-500">{p.uhid}</span> : null}
+                      {p.phone ? <span className="ml-2 text-slate-400">{p.phone}</span> : null}
+                    </button>
+                  ))}
+                </div>
+              )}
             </label>
             <label className="block">
               <span className="text-[10px] font-semibold text-slate-500 uppercase">Phone</span>
@@ -2283,7 +2755,40 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
             </label>
             <label className="block">
               <span className="text-[10px] font-semibold text-slate-500 uppercase">Age</span>
-              <input type="number" min="0" value={patientAge} onChange={(e) => setPatientAge(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+              <div className="mt-1 flex gap-2">
+                <input type="number" min="0" value={patientAge} onChange={(e) => setPatientAge(e.target.value)} className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+                <select value={patientAgeUnit} onChange={(e) => setPatientAgeUnit(e.target.value)} className="rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white">
+                  <option value="years">Years</option>
+                  <option value="months">Months</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+            </label>
+            <label className="block">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">Invoice date</span>
+              <FormattedDateInput
+                value={invoiceDate}
+                onChange={setInvoiceDate}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">Invoice time</span>
+              <div className="mt-1">
+                <AmPmTimeInput
+                  value={invoiceTime}
+                  onChange={setInvoiceTime}
+                  selectClassName="border border-slate-200 rounded-lg text-sm bg-white"
+                />
+              </div>
+            </label>
+            <label className="block">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">Doctor name</span>
+              <input value={doctorName} onChange={(e) => setDoctorName(e.target.value)} placeholder="Optional" className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
+            </label>
+            <label className="block">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">Hospital name</span>
+              <input value={hospitalName} onChange={(e) => setHospitalName(e.target.value)} placeholder="Optional" className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             </label>
             <label className="block md:col-span-2">
               <span className="text-[10px] font-semibold text-slate-500 uppercase">Guardian</span>
@@ -2305,7 +2810,12 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
 
           <div className="border border-slate-200 rounded-lg overflow-hidden">
             <div className="px-2 py-2 bg-slate-50 flex items-center justify-between">
-              <span className="text-[11px] font-bold text-slate-700">Medicines</span>
+              <span className="text-[11px] font-bold text-slate-700">
+                Medicines
+                {medicines.length === 0 ? (
+                  <span className="ml-2 font-normal text-slate-400">Loading medicine list…</span>
+                ) : null}
+              </span>
               <button type="button" onClick={addItem} className="px-2 py-1 rounded border border-blue-200 bg-blue-50 text-blue-700 text-[10px] font-semibold">+ Add row</button>
             </div>
             <div className="overflow-x-auto">
@@ -2315,6 +2825,7 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
                     <th className="px-2 py-1 text-left">Medicine</th>
                     <th className="px-2 py-1 text-left">Batch</th>
                     <th className="px-2 py-1 text-right">Qty</th>
+                    <th className="px-2 py-1 text-right">Free</th>
                     <th className="px-2 py-1 text-right">MRP</th>
                     <th className="px-2 py-1 text-right">Rate</th>
                     <th className="px-2 py-1 text-right">CGST%</th>
@@ -2326,6 +2837,8 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
                 <tbody className="divide-y divide-slate-100">
                   {items.map((row, idx) => {
                     const medBatches = batches.filter((b) => String(b.medicine) === String(row.medicine))
+                    const medMissing = row.medicine && !medicines.some((m) => String(m.id) === String(row.medicine))
+                    const batchMissing = row.batch && !medBatches.some((b) => String(b.id) === String(row.batch))
                     const line = (Number(row.qty || 0) * Number(row.rate || 0)) * (1 + (Number(row.cgst_rate || 0) + Number(row.sgst_rate || 0)) / 100)
                     const deleteBlocked = items.length <= 1
                     return (
@@ -2333,16 +2846,27 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
                         <td className="px-2 py-1 min-w-[190px]">
                           <select value={row.medicine} onChange={(e) => handleMedicineChange(idx, e.target.value)} className="w-full rounded border border-slate-200 px-2 py-1 bg-white">
                             <option value="">Select</option>
+                            {medMissing && (
+                              <option value={String(row.medicine)}>
+                                {invoiceItemLabels.meds.get(String(row.medicine)) || 'Medicine on bill'}
+                              </option>
+                            )}
                             {medicines.map((m) => <option key={m.id} value={String(m.id)}>{m.name}</option>)}
                           </select>
                         </td>
                         <td className="px-2 py-1 min-w-[160px]">
                           <select value={row.batch} onChange={(e) => handleBatchChange(idx, e.target.value)} className="w-full rounded border border-slate-200 px-2 py-1 bg-white">
                             <option value="">Select</option>
+                            {batchMissing && (
+                              <option value={String(row.batch)}>
+                                {invoiceItemLabels.batchNos.get(String(row.batch)) || 'Batch on bill'}
+                              </option>
+                            )}
                             {medBatches.map((b) => <option key={b.id} value={String(b.id)}>{b.batch_no}</option>)}
                           </select>
                         </td>
                         <td className="px-2 py-1"><input type="number" min="0.01" step="0.01" value={row.qty} onChange={(e) => updateItem(idx, { qty: e.target.value })} className="w-20 rounded border border-slate-200 px-2 py-1 text-right" /></td>
+                        <td className="px-2 py-1"><input type="number" min="0" step="0.01" value={row.free_qty} onChange={(e) => updateItem(idx, { free_qty: e.target.value })} className="w-16 rounded border border-slate-200 px-2 py-1 text-right" /></td>
                         <td className="px-2 py-1"><input type="number" min="0" step="0.01" value={row.mrp} onChange={(e) => updateItem(idx, { mrp: e.target.value })} className="w-20 rounded border border-slate-200 px-2 py-1 text-right" /></td>
                         <td className="px-2 py-1"><input type="number" min="0" step="0.01" value={row.rate} onChange={(e) => updateItem(idx, { rate: e.target.value })} className="w-20 rounded border border-slate-200 px-2 py-1 text-right" /></td>
                         <td className="px-2 py-1"><input type="number" min="0" step="0.01" value={row.cgst_rate} onChange={(e) => updateItem(idx, { cgst_rate: e.target.value })} className="w-16 rounded border border-slate-200 px-2 py-1 text-right" /></td>
@@ -2390,8 +2914,8 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
                 disabled={settlementType === 'due'}
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm bg-white"
               >
-                {['cash', 'upi', 'other', 'bank_transfer', 'credit'].map((m) => (
-                  <option key={m} value={m}>{m}</option>
+                {EDIT_PAYMENT_METHODS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
                 ))}
               </select>
             </label>
@@ -2399,23 +2923,81 @@ function EditSaleInvoiceModal({ invoice, onClose, onSaved }) {
               <span className="text-[10px] font-semibold text-slate-500 uppercase">Paid amount</span>
               <input
                 type="number"
-                value={settlementType === 'due' ? '0' : Number(totals.grandTotal || 0).toFixed(2)}
+                value={settlementType === 'due' ? '0' : Number(totals.payable || 0).toFixed(2)}
                 readOnly
                 disabled
                 className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm disabled:bg-slate-100"
               />
             </label>
             <label className="block">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">Discount (₹)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={discountInput}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                    setDiscountInput(raw)
+                    setDiscountLastEdited('discount')
+                    const disc = raw === '' || raw === '.' ? 0 : Math.max(0, Math.min(Number(raw) || 0, totals.grandTotal))
+                    const after = totals.grandTotal - disc
+                    setAfterDiscountInput(String(after))
+                  }
+                }}
+                onBlur={() => {
+                  const val = Math.max(0, Math.min(Number(discountInput) || 0, totals.grandTotal))
+                  setDiscountInput(val > 0 ? String(val) : '')
+                  setAfterDiscountInput(String((totals.grandTotal - val).toFixed(2)))
+                }}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="block">
+              <span className="text-[10px] font-semibold text-slate-500 uppercase">After discount (₹)</span>
+              <input
+                type="text"
+                inputMode="decimal"
+                value={afterDiscountInput}
+                onChange={(e) => {
+                  const raw = e.target.value
+                  if (raw === '' || /^\d*\.?\d*$/.test(raw)) {
+                    setAfterDiscountInput(raw)
+                    setDiscountLastEdited('after')
+                    const after = raw === '' || raw === '.' ? 0 : Math.max(0, Math.min(Number(raw) || 0, totals.grandTotal))
+                    const disc = totals.grandTotal - after
+                    setDiscountInput(disc > 0 ? String(disc) : '')
+                  }
+                }}
+                onBlur={() => {
+                  const after = Math.max(0, Math.min(Number(afterDiscountInput) || 0, totals.grandTotal))
+                  setAfterDiscountInput(String(after.toFixed(2)))
+                  const disc = totals.grandTotal - after
+                  setDiscountInput(disc > 0 ? String(disc) : '')
+                }}
+                className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm"
+              />
+            </label>
+            <label className="block md:col-span-1">
               <span className="text-[10px] font-semibold text-slate-500 uppercase">Remarks</span>
               <input value={remarks} onChange={(e) => setRemarks(e.target.value)} className="mt-1 w-full rounded-lg border border-slate-200 px-2 py-1.5 text-sm" />
             </label>
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-2 text-xs">
+          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-2 text-xs">
             <div className="rounded border border-slate-200 p-2"><div className="text-slate-500">Subtotal</div><div className="font-bold">₹{totals.subtotal.toFixed(2)}</div></div>
             <div className="rounded border border-slate-200 p-2"><div className="text-slate-500">CGST</div><div className="font-bold">₹{totals.cgst.toFixed(2)}</div></div>
             <div className="rounded border border-slate-200 p-2"><div className="text-slate-500">SGST</div><div className="font-bold">₹{totals.sgst.toFixed(2)}</div></div>
-            <div className="rounded border border-slate-200 p-2"><div className="text-slate-500">Grand total</div><div className="font-bold">₹{totals.grandTotal.toFixed(2)}</div></div>
+            <div className="rounded border border-amber-200 bg-amber-50 p-2"><div className="text-amber-700">Discount</div><div className="font-bold text-amber-800">₹{totals.discount.toFixed(2)}</div></div>
+            <div className="rounded border border-slate-200 p-2"><div className="text-slate-500">After discount</div><div className="font-bold">₹{totals.afterDiscount.toFixed(2)}</div></div>
+            <div className="rounded border border-slate-200 p-2">
+              <div className="text-slate-500">Round off</div>
+              <div className="font-bold">
+                {totals.roundOff === 0 ? '—' : `${totals.roundOff > 0 ? '+' : '−'}₹${Math.abs(totals.roundOff).toFixed(2)}`}
+              </div>
+            </div>
+            <div className="rounded border border-blue-200 bg-blue-50 p-2"><div className="text-blue-700">Payable</div><div className="font-bold text-blue-800">₹{totals.payable.toFixed(2)}</div></div>
+            <div className="rounded border border-emerald-200 bg-emerald-50 p-2"><div className="text-emerald-700">Margin</div><div className="font-bold text-emerald-800">₹{totals.margin.toFixed(2)}</div></div>
             <div className="rounded border border-slate-200 p-2"><div className="text-slate-500">Due</div><div className="font-bold text-amber-700">₹{totals.due.toFixed(2)}</div></div>
           </div>
 
@@ -2672,6 +3254,14 @@ function normalizeNonNegativeNumberInput(raw) {
   if (text === '') return ''
   const value = Number(text)
   if (!Number.isFinite(value) || value < 0) return null
+  return text
+}
+
+/** Whole numbers only (0, 1, 2, …) — rejects decimals and invalid characters. */
+function normalizeNonNegativeIntegerInput(raw) {
+  const text = String(raw ?? '').trim()
+  if (text === '') return ''
+  if (!/^\d+$/.test(text)) return null
   return text
 }
 
@@ -2965,7 +3555,7 @@ function AddMedicineModal({ onClose, onRefresh, onMedicineCreated, defaultGstPer
       const packs = Number(data.opening_stock_pack_qty)
       if (data.opening_stock_pack_qty !== '' && Number.isFinite(packs) && packs >= 0) {
         const unitsValue = packs * openingUnitsPerPack
-        const normalizedUnits = formatStockNumber(unitsValue)
+        const normalizedUnits = String(Math.round(unitsValue))
         if (normalizedUnits !== data.opening_stock_qty) {
           setData((d) => ({ ...d, opening_stock_qty: normalizedUnits }))
         }
@@ -2990,7 +3580,7 @@ function AddMedicineModal({ onClose, onRefresh, onMedicineCreated, defaultGstPer
   ])
 
   function handleOpeningStockUnitsChange(rawValue) {
-    const normalized = normalizeNonNegativeNumberInput(rawValue)
+    const normalized = normalizeNonNegativeIntegerInput(rawValue)
     if (normalized === null) return
     setOpeningStockEditedBy('units')
     if (normalized === '') {
@@ -3019,7 +3609,7 @@ function AddMedicineModal({ onClose, onRefresh, onMedicineCreated, defaultGstPer
       return
     }
     const packsValue = Number(normalized)
-    const unitsValue = formatStockNumber(packsValue * openingUnitsPerPack)
+    const unitsValue = String(Math.round(packsValue * openingUnitsPerPack))
     setData((d) => ({ ...d, opening_stock_pack_qty: normalized, opening_stock_qty: unitsValue }))
   }
 
@@ -3043,6 +3633,9 @@ function AddMedicineModal({ onClose, onRefresh, onMedicineCreated, defaultGstPer
       const oq = Number(openStockRaw)
       if (!Number.isFinite(oq) || oq < 0) {
         return toast.error('Opening stock must be zero or a positive number')
+      }
+      if (!Number.isInteger(oq)) {
+        return toast.error('Opening stock must be a whole number')
       }
     }
     const { unitMrp, unitSale, unitCost } = computeUnitPricingForAddMedicine(data, unitsPerPack)
@@ -3707,7 +4300,7 @@ function AddMedicineModal({ onClose, onRefresh, onMedicineCreated, defaultGstPer
                         <input
                           type="number"
                           min={0}
-                          step="any"
+                          step={1}
                           value={data.opening_stock_qty}
                           onChange={(e) => handleOpeningStockUnitsChange(e.target.value)}
                           placeholder="0"
@@ -3839,6 +4432,8 @@ function AddPatientModal({ onClose, onAdd, initialSearchName = '' }) {
     phone: '',
     address_line1: '',
     gender: 'male',
+    age: '',
+    age_unit: 'years',
     doctor_name: '',
     hospital_name: '',
   })
@@ -3872,6 +4467,10 @@ function AddPatientModal({ onClose, onAdd, initialSearchName = '' }) {
         hospital_id: getHospitalId(),
       }
       if (addressLine1) payload.address_line1 = addressLine1
+      if (data.age !== '' && data.age != null) {
+        payload.age = Number(data.age)
+        payload.age_unit = data.age_unit || 'years'
+      }
       const res = await api.post('/patients/', payload)
       toast.success('Patient registered')
       const created = res.data?.data || res.data
@@ -3935,6 +4534,28 @@ function AddPatientModal({ onClose, onAdd, initialSearchName = '' }) {
                 <option value="other">Other</option>
               </select>
             </label>
+            <label className="col-span-1">
+              <span className="text-[10px] font-semibold text-slate-600">Age</span>
+              <div className="mt-0.5 flex gap-1.5">
+                <input
+                  type="number"
+                  min="0"
+                  value={data.age}
+                  onChange={(e) => setData({ ...data, age: e.target.value })}
+                  placeholder="Optional"
+                  className="w-full border border-slate-300 rounded px-2 py-1.5 text-sm"
+                />
+                <select
+                  value={data.age_unit}
+                  onChange={(e) => setData({ ...data, age_unit: e.target.value })}
+                  className="border border-slate-300 rounded px-2 py-1.5 text-sm bg-white"
+                >
+                  <option value="years">Years</option>
+                  <option value="months">Months</option>
+                  <option value="days">Days</option>
+                </select>
+              </div>
+            </label>
             <label className="col-span-2">
               <span className="text-[10px] font-semibold text-slate-600">Address</span>
               <input
@@ -3980,6 +4601,999 @@ function AddPatientModal({ onClose, onAdd, initialSearchName = '' }) {
           </button>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// ReturnView — three-screen return flow
+// ---------------------------------------------------------------------------
+
+const LIST_PAGE_SIZE = 10
+const HIST_PAGE_SIZE = 15
+
+function ReturnView({ outletSettings, onPrint }) {
+  // screen: 'list' (search & pick patient) | 'invoices' (patient's bills) | 'detail' (return editor)
+  const [screen, setScreen] = useState('list')
+  const [q, setQ] = useState('')
+  const [listRows, setListRows] = useState([])         // search results
+  const [listLoading, setListLoading] = useState(false)
+  const [defaultRows, setDefaultRows] = useState([])   // loaded on mount / after return
+  const [defaultLoading, setDefaultLoading] = useState(false)
+  const [defaultRefreshToken, setDefaultRefreshToken] = useState(0)
+  const [listPage, setListPage] = useState(0)
+  const [selectedPatient, setSelectedPatient] = useState(null)
+  const [patientInvoices, setPatientInvoices] = useState([])
+  const [patientLoading, setPatientLoading] = useState(false)
+  const [selectedInvoice, setSelectedInvoice] = useState(null)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [returnQtyById, setReturnQtyById] = useState({})
+  const [returnDisplayById, setReturnDisplayById] = useState({})
+  const [returnOverById, setReturnOverById] = useState({})
+  const [submitting, setSubmitting] = useState(false)
+  const [returnDone, setReturnDone] = useState(false)
+  const [updatedInvoice, setUpdatedInvoice] = useState(null)
+  const [returnRefundAmt, setReturnRefundAmt] = useState(0)
+  const [fullCancelModal, setFullCancelModal] = useState(null)
+  const [billAutoCancelled, setBillAutoCancelled] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [historyGroups, setHistoryGroups] = useState([])
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [historyError, setHistoryError] = useState(null)
+  const [histPage, setHistPage] = useState(0)
+  const [expandedHistKeys, setExpandedHistKeys] = useState(() => new Set())
+
+  // ── Screen 1: load recent patients on mount + after each return ──────────
+  useEffect(() => {
+    let cancelled = false
+    setDefaultLoading(true)
+    api.get('/pharmacy/invoices/', { params: { status: 'finalized', limit: 200 } })
+      .then(({ data }) => {
+        if (cancelled) return
+        const rows = (data?.data || data?.results || []).filter((inv) => inv.patient && inv.patient_details)
+        // Group by patient, preserve insertion order (newest first), cap at 50 unique patients
+        const map = {}
+        const order = []
+        for (const inv of rows) {
+          const pid = String(inv.patient)
+          if (!map[pid]) {
+            const pd = inv.patient_details || {}
+            const name = [pd.first_name, pd.last_name].filter(Boolean).join(' ').trim() || '—'
+            map[pid] = { patient_id: pid, patient_name: name, phone: pd.phone || '', uhid: pd.uhid || '', invoices: [] }
+            order.push(pid)
+          }
+          map[pid].invoices.push(inv)
+        }
+        setDefaultRows(order.slice(0, 50).map((pid) => map[pid]))
+      })
+      .catch(() => {})
+      .finally(() => { if (!cancelled) setDefaultLoading(false) })
+    return () => { cancelled = true }
+  }, [defaultRefreshToken])
+
+  // ── Screen 1: debounced search ────────────────────────────────────────────
+  useEffect(() => {
+    if (screen !== 'list') return
+    if (!q.trim()) { setListRows([]); return }
+
+    let cancelled = false
+    const timer = setTimeout(async () => {
+      setListLoading(true)
+      try {
+        const { data } = await api.get('/pharmacy/invoices/', {
+          params: { search: q.trim(), status: 'finalized', limit: 50 },
+        })
+        if (cancelled) return
+        const rows = data?.data || data?.results || []
+        setListRows(rows.filter((inv) => inv.patient && inv.patient_details))
+      } catch {
+        if (!cancelled) toast.error('Search failed')
+      } finally {
+        if (!cancelled) setListLoading(false)
+      }
+    }, 400)
+    return () => { cancelled = true; clearTimeout(timer) }
+  }, [q, screen])
+
+  // Reset page when search query changes
+  useEffect(() => { setListPage(0) }, [q])
+
+  // ── Group search rows by patient ──────────────────────────────────────────
+  const patientGroups = useMemo(() => {
+    const map = {}
+    const order = []
+    for (const inv of listRows) {
+      const pid = String(inv.patient)
+      if (!map[pid]) {
+        const pd = inv.patient_details || {}
+        const name = [pd.first_name, pd.last_name].filter(Boolean).join(' ').trim() || '—'
+        map[pid] = { patient_id: pid, patient_name: name, phone: pd.phone || '', uhid: pd.uhid || '', invoices: [] }
+        order.push(pid)
+      }
+      map[pid].invoices.push(inv)
+    }
+    return order.map((pid) => map[pid])
+  }, [listRows])
+
+  // ── Screen 2: patient's finalized invoices ────────────────────────────────
+  const loadPatientInvoices = useCallback(async (patient, noNavigate = false) => {
+    if (!noNavigate) {
+      setSelectedPatient(patient)
+      setScreen('invoices')
+    }
+    setPatientLoading(true)
+    try {
+      const { data } = await api.get('/pharmacy/invoices/', {
+        params: { patient: patient.patient_id, status: 'finalized', limit: 100 },
+      })
+      setPatientInvoices(data?.data || data?.results || [])
+    } catch {
+      toast.error('Failed to load invoices')
+      setPatientInvoices([])
+    } finally {
+      setPatientLoading(false)
+    }
+  }, [])
+
+  // ── Screen 3: full invoice detail ─────────────────────────────────────────
+  const openReturnDetail = useCallback(async (inv) => {
+    setScreen('detail')
+    setReturnDone(false)
+    setUpdatedInvoice(null)
+    setReturnQtyById({})
+    setReturnDisplayById({})
+    setReturnOverById({})
+    setFullCancelModal(null)
+    setBillAutoCancelled(false)
+    setDetailLoading(true)
+    try {
+      const { data } = await api.get(`/pharmacy/invoices/${inv.id}/`)
+      const full = data?.data || data || inv
+      setSelectedInvoice(full)
+    } catch {
+      toast.error('Failed to load invoice')
+      setSelectedInvoice(inv)
+    } finally {
+      setDetailLoading(false)
+    }
+  }, [])
+
+  // ── Shared: recreate missing batches before any return/cancel API call ─────
+  const recreateMissingBatches = useCallback(async (invoice, qtyById) => {
+    const overrides = {}
+    for (const item of invoice.items || []) {
+      if (item.batch !== null) continue
+      if (!((qtyById[item.id] ?? 0) > 0)) continue
+      if (!item.snapshot_batch_no) {
+        toast.error(`Cannot return ${item.medicine_name || 'item'}: no batch info available`)
+        return null
+      }
+      try {
+        const { data: bd } = await api.post('/batches/', {
+          medicine: item.medicine,
+          batch_no: item.snapshot_batch_no,
+          expiry_date: item.snapshot_expiry_date || null,
+          unit_cost: item.snapshot_unit_cost || 0,
+          mrp: item.mrp || 0,
+          sale_rate: item.rate || 0,
+        })
+        overrides[item.id] = (bd?.data || bd)?.id
+      } catch {
+        try {
+          const { data: found } = await api.get('/batches/', {
+            params: { medicine: item.medicine, batch_no: item.snapshot_batch_no, limit: 1 },
+          })
+          const existing = (found?.data || found?.results || [])[0]
+          if (existing?.id) {
+            overrides[item.id] = existing.id
+          } else {
+            toast.error(`Cannot return ${item.medicine_name || 'item'}: batch could not be created`)
+            return null
+          }
+        } catch {
+          toast.error(`Cannot return ${item.medicine_name || 'item'}: batch could not be created`)
+          return null
+        }
+      }
+    }
+    return overrides
+  }, [])
+
+  // ── Full-bill cancel (called after user confirms in the popup) ─────────────
+  const confirmFullBillCancel = useCallback(async () => {
+    if (!selectedInvoice) return
+    setFullCancelModal((prev) => ({ ...prev, processing: true }))
+
+    const overrides = await recreateMissingBatches(selectedInvoice, returnQtyById)
+    if (overrides === null) {
+      setFullCancelModal((prev) => ({ ...prev, processing: false }))
+      return
+    }
+
+    try {
+      const { data } = await api.post(`/pharmacy/invoices/${selectedInvoice.id}/cancel/`, {
+        cancel_reason: 'Full return — all items returned',
+      })
+      const cancelled = data?.data || data
+      const refundAmt = Number(selectedInvoice.grand_total || 0)
+      setUpdatedInvoice(cancelled)
+      setReturnRefundAmt(refundAmt)
+      setBillAutoCancelled(true)
+      setReturnDone(true)
+      setFullCancelModal(null)
+      toast.success(`Bill cancelled. Refund: ₹${refundAmt.toFixed(2)}`)
+      setDefaultRefreshToken((n) => n + 1)
+      if (selectedPatient) loadPatientInvoices(selectedPatient, true)
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || 'Cancellation failed'
+      toast.error(typeof msg === 'string' ? msg : 'Cancellation failed')
+      setFullCancelModal((prev) => ({ ...prev, processing: false }))
+    }
+  }, [selectedInvoice, returnQtyById, selectedPatient, recreateMissingBatches])
+
+  // ── Submit return ──────────────────────────────────────────────────────────
+  const submitReturn = useCallback(async () => {
+    if (!selectedInvoice) return
+    if (Object.values(returnOverById).some(Boolean)) {
+      toast.error('Return quantity exceeds sold quantity for one or more items. Please correct before confirming.')
+      return
+    }
+    const err = validateReturn(selectedInvoice, returnQtyById)
+    if (err) { toast.error(err); return }
+
+    // Full return → show cancel confirmation popup instead of submitting
+    if (isFullBillReturn(selectedInvoice, returnQtyById)) {
+      setFullCancelModal({
+        invoice: selectedInvoice,
+        refundAmt: Number(selectedInvoice.grand_total || 0),
+        processing: false,
+      })
+      return
+    }
+
+    const gstEnabled = Boolean(selectedInvoice.gst_enabled)
+    const { newSubtotal, newCgst, newSgst, newGrandTotal } = calcPreviewTotals(
+      selectedInvoice.items || [],
+      returnQtyById,
+      gstEnabled,
+    )
+    const previewSubtotalPlusTax = newSubtotal + newCgst + newSgst
+
+    setSubmitting(true)
+
+    const batchOverrideById = await recreateMissingBatches(selectedInvoice, returnQtyById)
+    if (batchOverrideById === null) {
+      setSubmitting(false)
+      return
+    }
+
+    const invoiceForPayload = Object.keys(batchOverrideById).length > 0
+      ? {
+          ...selectedInvoice,
+          items: (selectedInvoice.items || []).map((it) =>
+            batchOverrideById[it.id] ? { ...it, batch: batchOverrideById[it.id] } : it,
+          ),
+        }
+      : selectedInvoice
+
+    const payload = buildReturnPayload(
+      invoiceForPayload,
+      returnQtyById,
+      newGrandTotal,
+      previewSubtotalPlusTax,
+    )
+
+    try {
+      const { data } = await api.patch(`/pharmacy/invoices/${selectedInvoice.id}/update-full/`, payload)
+      const updated = data?.data || data
+      const refundAmt = Math.max(0, Number(selectedInvoice.grand_total || 0) - Number(updated?.grand_total || 0))
+      toast.success(`Return processed. Refund: ₹${refundAmt.toFixed(2)}`)
+      setUpdatedInvoice(updated)
+      setReturnRefundAmt(refundAmt)
+      setReturnDone(true)
+      setDefaultRefreshToken((n) => n + 1)
+    } catch (err) {
+      const msg = err?.response?.data?.detail || err?.response?.data?.message || 'Return failed'
+      toast.error(typeof msg === 'string' ? msg : 'Return failed')
+    } finally {
+      setSubmitting(false)
+    }
+  }, [selectedInvoice, returnQtyById, returnOverById, recreateMissingBatches])
+
+  // ── Return history (stock ledger return_in + pharmacy_edit) ──────────────
+  const openHistory = useCallback(async () => {
+    setHistoryOpen(true)
+    setHistoryLoading(true)
+    setHistoryError(null)
+    setHistPage(0)
+    setExpandedHistKeys(new Set())
+    try {
+      const pickRows = (data) => data?.data || data?.results || []
+      const [editRes, cancelRes] = await Promise.all([
+        api.get('/stock-ledgers/', { params: { reason: 'return_in', reference_type: 'pharmacy_edit', limit: 500 } }),
+        api.get('/stock-ledgers/', { params: { reason: 'return_in', reference_type: 'pharmacy_cancel', limit: 500 } }),
+      ])
+      const rows = [...pickRows(editRes.data), ...pickRows(cancelRes.data)]
+      setHistoryGroups(groupReturnHistoryRows(rows))
+    } catch (err) {
+      const status = err?.response?.status
+      if (status === 403) {
+        setHistoryError('You do not have permission to view return history.')
+      } else {
+        setHistoryError('Failed to load return history.')
+      }
+      setHistoryGroups([])
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [])
+
+  const toggleHistGroup = useCallback((key) => {
+    setExpandedHistKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
+
+  const closeHistory = useCallback(() => {
+    setHistoryOpen(false)
+    setExpandedHistKeys(new Set())
+  }, [])
+
+  // ── Qty display helpers ────────────────────────────────────────────────────
+  const b2cOutlet = useMemo(() => resolveOutletForChannel(outletSettings, 'b2c'), [outletSettings])
+  const qtyDisplayMode = b2cOutlet?.sale_bill_qty_display || 'base_units'
+
+  // ── Screen renderers ───────────────────────────────────────────────────────
+  const gstEnabled = Boolean(selectedInvoice?.gst_enabled)
+  const { newSubtotal, newCgst, newSgst, newGrandTotal, totalRefund } = useMemo(
+    () => calcPreviewTotals(selectedInvoice?.items || [], returnQtyById, gstEnabled),
+    [selectedInvoice, returnQtyById, gstEnabled],
+  )
+  /** Retail bills settle in whole rupees, matching what update-full will store. */
+  const newPayableTotal = useMemo(
+    () => (selectedInvoice?.party ? newGrandTotal : computeInvoiceRoundOff(newGrandTotal).payable),
+    [newGrandTotal, selectedInvoice?.party],
+  )
+
+  if (screen === 'list') {
+    const isSearching = q.trim().length > 0
+    const activeGroups = isSearching ? patientGroups : defaultRows
+    const totalPages = Math.ceil(activeGroups.length / LIST_PAGE_SIZE)
+    const pageGroups = activeGroups.slice(listPage * LIST_PAGE_SIZE, (listPage + 1) * LIST_PAGE_SIZE)
+
+    return (
+      <div className="relative h-full flex flex-col gap-3 overflow-hidden min-h-0 bg-gradient-to-br from-slate-50 via-white to-rose-50/40 rounded-xl p-3">
+        {/* Header row with title, search box and History button */}
+        <div className="shrink-0 flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <h2 className="text-base font-bold text-slate-900 mb-2">Returns</h2>
+            <div className="relative w-full max-w-sm">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" size={14} />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search by invoice no, patient name or phone…"
+                className="w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 py-1.5 text-xs outline-none focus:border-blue-500"
+              />
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={openHistory}
+            className="shrink-0 flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-blue-600 border border-slate-200 hover:border-blue-400 rounded-lg px-3 py-2 bg-white transition-colors mt-0.5"
+          >
+            <HistoryIcon size={15} /> History
+          </button>
+        </div>
+
+        {/* Patient list */}
+        <div className="flex-1 min-h-0 overflow-y-auto">
+          {(isSearching ? listLoading : defaultLoading) ? (
+            <div className="flex items-center justify-center h-32 text-slate-400 text-sm">{isSearching ? 'Searching…' : 'Loading…'}</div>
+          ) : activeGroups.length === 0 ? (
+            isSearching ? (
+              <div className="flex items-center justify-center h-32 text-slate-400 text-sm">No finalized invoices found</div>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full gap-3 text-slate-400">
+                <ReturnIcon size={40} />
+                <p className="text-sm">Search an invoice number, patient name or phone to start a return</p>
+              </div>
+            )
+          ) : (
+            <div className="grid gap-2 pt-1">
+              {pageGroups.map((pt) => (
+                <button
+                  key={pt.patient_id}
+                  type="button"
+                  onClick={() => loadPatientInvoices(pt)}
+                  className="w-full text-left bg-white border border-slate-200 hover:border-blue-400 hover:bg-blue-50/40 rounded-xl px-4 py-3 transition-colors group"
+                >
+                  <div className="flex items-center gap-3">
+                    <div className="w-8 h-8 bg-rose-100 rounded-full flex items-center justify-center shrink-0">
+                      <PersonIcon size={16} className="text-rose-600" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-slate-900 text-sm">{pt.patient_name}</div>
+                      <div className="text-[10px] text-slate-500">
+                        {pt.phone ? `${pt.phone} · ` : ''}{pt.uhid ? `UHID: ${pt.uhid} · ` : ''}{pt.invoices.length} invoice{pt.invoices.length !== 1 ? 's' : ''}
+                      </div>
+                    </div>
+                    <ChevronRight size={16} className="text-slate-400 group-hover:text-blue-500 shrink-0" />
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Pagination */}
+        {activeGroups.length > 0 && (
+          <div className="shrink-0 flex items-center justify-between text-xs text-slate-600 pt-1 border-t border-slate-100">
+            <span>
+              {activeGroups.length === 0
+                ? 'No patients'
+                : `Showing ${listPage * LIST_PAGE_SIZE + 1}–${Math.min((listPage + 1) * LIST_PAGE_SIZE, activeGroups.length)} of ${activeGroups.length}`}
+            </span>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                disabled={listPage === 0}
+                onClick={() => setListPage((p) => p - 1)}
+                className="px-2 py-0.5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Prev
+              </button>
+              <span className="px-2">Page {listPage + 1} of {totalPages || 1}</span>
+              <button
+                type="button"
+                disabled={(listPage + 1) * LIST_PAGE_SIZE >= activeGroups.length}
+                onClick={() => setListPage((p) => p + 1)}
+                className="px-2 py-0.5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Return History slide-in panel — fixed portal so full viewport (including sidebar) is dimmed */}
+        {historyOpen && createPortal(
+          <div className="fixed inset-0 flex items-stretch z-[400]">
+            {/* Backdrop — covers sidebar + content */}
+            <div className="flex-1 bg-black/40" onClick={closeHistory} />
+            {/* Panel */}
+            <div className="w-full max-w-lg bg-white shadow-2xl flex flex-col overflow-hidden">
+              <div className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-white">
+                <div className="flex items-center gap-2">
+                  <HistoryIcon size={18} className="text-rose-500" />
+                  <span className="font-bold text-slate-900 text-sm">Return History</span>
+                </div>
+                <button type="button" onClick={closeHistory} className="text-slate-400 hover:text-slate-700">
+                  <CloseIcon fontSize="small" />
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto min-h-0">
+                {historyLoading ? (
+                  <div className="flex items-center justify-center h-32 text-slate-400 text-sm">Loading…</div>
+                ) : historyError ? (
+                  <div className="flex items-center justify-center h-32 text-slate-500 text-sm px-4 text-center">{historyError}</div>
+                ) : historyGroups.length === 0 ? (
+                  <div className="flex items-center justify-center h-32 text-slate-400 text-sm">No return records found</div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {historyGroups
+                      .slice(histPage * HIST_PAGE_SIZE, (histPage + 1) * HIST_PAGE_SIZE)
+                      .map((group) => {
+                        const expanded = expandedHistKeys.has(group.key)
+                        const customerName = group.customerName || 'Patient'
+                        const invoiceLabel = group.invoiceNo ? `#${group.invoiceNo}` : (group.referenceId ? `#${String(group.referenceId).slice(0, 8)}` : '#—')
+                        const dateStr = group.returnedAt ? safeFormat(group.returnedAt, 'dd MMM yyyy') : '—'
+                        return (
+                          <div key={group.key} className="bg-white">
+                            <button
+                              type="button"
+                              onClick={() => toggleHistGroup(group.key)}
+                              className="w-full flex items-center gap-2 px-3 py-2.5 text-left hover:bg-slate-50/80 transition-colors"
+                            >
+                              <span className={`shrink-0 text-slate-400 transition-transform ${expanded ? 'rotate-180' : ''}`}>
+                                <ExpandMore size={16} />
+                              </span>
+                              <span className="flex-1 min-w-0 text-[11px]">
+                                <span className="font-semibold text-slate-900">{customerName}</span>
+                                <span className="text-slate-400 mx-1">·</span>
+                                <span className="font-mono text-blue-700">{invoiceLabel}</span>
+                                <span className="text-slate-400 mx-1">·</span>
+                                <span className="text-slate-500">{dateStr}</span>
+                              </span>
+                              <span className="shrink-0 text-[11px] font-semibold text-rose-700">
+                                {group.refundAmount > 0 ? `₹${group.refundAmount.toFixed(2)}` : '—'}
+                              </span>
+                              <span className="shrink-0 text-[9px] text-slate-400">{group.items.length} item{group.items.length !== 1 ? 's' : ''}</span>
+                            </button>
+                            {expanded && (
+                              <table className="w-full text-left text-[10px] border-t border-slate-100 bg-slate-50/40">
+                                <thead className="text-[9px] font-bold text-slate-500 uppercase">
+                                  <tr>
+                                    <th className="px-4 py-1.5 pl-9">Medicine</th>
+                                    <th className="px-3 py-1.5">Batch</th>
+                                    <th className="px-3 py-1.5 text-right">Qty Returned</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {group.items.map((item, i) => (
+                                    <tr key={item.id ?? `${group.key}-${i}`} className="border-t border-slate-100/80">
+                                      <td className="px-4 py-1.5 pl-9 font-medium text-slate-800">{item.medicine_name}</td>
+                                      <td className="px-3 py-1.5 text-slate-500 font-mono">{item.batch_no}</td>
+                                      <td className="px-3 py-1.5 text-right text-rose-600 font-semibold">{item.qty_change ?? '—'}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        )
+                      })}
+                  </div>
+                )}
+              </div>
+              {historyGroups.length > 0 && (
+                <div className="shrink-0 flex items-center justify-between text-xs text-slate-600 px-3 py-2 border-t border-slate-100 bg-slate-50/70">
+                  <span>
+                    {`Showing ${histPage * HIST_PAGE_SIZE + 1}–${Math.min((histPage + 1) * HIST_PAGE_SIZE, historyGroups.length)} of ${historyGroups.length}`}
+                  </span>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      disabled={histPage === 0}
+                      onClick={() => setHistPage((p) => p - 1)}
+                      className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40"
+                    >
+                      Prev
+                    </button>
+                    <button
+                      type="button"
+                      disabled={(histPage + 1) * HIST_PAGE_SIZE >= historyGroups.length}
+                      onClick={() => setHistPage((p) => p + 1)}
+                      className="px-2 py-1 rounded border border-slate-200 disabled:opacity-40"
+                    >
+                      Next
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
+      </div>
+    )
+  }
+
+  if (screen === 'invoices') {
+    return (
+      <div className="h-full flex flex-col gap-3 overflow-hidden min-h-0 bg-gradient-to-br from-slate-50 via-white to-rose-50/40 rounded-xl p-3">
+        <div className="shrink-0 flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => { setScreen('list'); setSelectedPatient(null); setPatientInvoices([]) }}
+            className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-blue-600"
+          >
+            <ArrowBack size={16} /> Back
+          </button>
+          <span className="text-slate-300">|</span>
+          <div>
+            <h2 className="text-sm font-bold text-slate-900">{selectedPatient?.patient_name}</h2>
+            {selectedPatient?.phone && (
+              <span className="text-[10px] text-slate-500">{selectedPatient.phone}</span>
+            )}
+          </div>
+        </div>
+
+        <div className="flex-1 bg-white border border-slate-200 rounded-xl overflow-y-auto min-h-0 shadow-sm">
+          <table className="w-full text-left text-[11px]">
+            <thead className="bg-gradient-to-b from-slate-100 to-slate-50 sticky top-0 z-10 text-[10px] font-bold text-slate-500 uppercase">
+              <tr>
+                <th className="px-3 py-2">Invoice</th>
+                <th className="px-3 py-2">Date</th>
+                <th className="px-3 py-2">Method</th>
+                <th className="px-3 py-2 text-right">Paid</th>
+                <th className="px-3 py-2 text-right">Due</th>
+                <th className="px-3 py-2 text-right">Total</th>
+                <th className="px-3 py-2 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {patientLoading ? (
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">Loading…</td></tr>
+              ) : patientInvoices.length === 0 ? (
+                <tr><td colSpan={7} className="px-3 py-8 text-center text-slate-400">No finalized invoices found</td></tr>
+              ) : patientInvoices.map((inv) => {
+                const total = Number(inv.grand_total || 0)
+                const paid = Number(inv.paid_amount || 0)
+                const due = Math.max(0, Number(inv.due_amount ?? total - paid))
+                return (
+                  <tr key={inv.id} className="hover:bg-rose-50/30">
+                    <td className="px-3 py-2 font-mono text-blue-700">#{inv.invoice_no}</td>
+                    <td className="px-3 py-2 text-slate-600">{safeFormat(inv.date, 'dd MMM yyyy')}</td>
+                    <td className="px-3 py-2">
+                      <span className="text-[10px] uppercase font-bold bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">
+                        {inv.payment_method || 'cash'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2 text-right text-emerald-700 font-semibold">₹{paid.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right text-amber-700 font-semibold">₹{due.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">₹{total.toFixed(2)}</td>
+                    <td className="px-3 py-2 text-right">
+                      <button
+                        type="button"
+                        onClick={() => openReturnDetail(inv)}
+                        className="px-2.5 py-1 rounded-md bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold"
+                      >
+                        Open Return
+                      </button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )
+  }
+
+  // screen === 'detail'
+  const invoice = returnDone ? (updatedInvoice || selectedInvoice) : selectedInvoice
+  const displayItems = invoice?.items || []
+
+  return (
+    <div className="h-full flex flex-col overflow-hidden min-h-0 bg-gradient-to-br from-slate-50 via-white to-rose-50/40 rounded-xl">
+      {/* Header bar */}
+      <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-2.5 flex items-center gap-3">
+        <button
+          type="button"
+          onClick={async () => {
+            setScreen('invoices')
+            setSelectedInvoice(null)
+            setReturnQtyById({})
+            setReturnDisplayById({})
+            setReturnOverById({})
+            setFullCancelModal(null)
+            setBillAutoCancelled(false)
+            setReturnDone(false)
+            setUpdatedInvoice(null)
+            setReturnRefundAmt(0)
+            if (returnDone && selectedPatient) await loadPatientInvoices(selectedPatient, true)
+          }}
+          className="flex items-center gap-1 text-xs font-medium text-slate-600 hover:text-blue-600"
+        >
+          <ArrowBack size={16} /> Back
+        </button>
+        <span className="text-slate-200">|</span>
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-bold text-slate-900">
+            Return — #{invoice?.invoice_no}
+          </span>
+          {invoice?.patient_details && (
+            <span className="ml-2 text-[11px] text-slate-500">
+              {[invoice.patient_details.first_name, invoice.patient_details.last_name].filter(Boolean).join(' ')}
+              {invoice.patient_details.phone ? ` · ${invoice.patient_details.phone}` : ''}
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-3 shrink-0 text-[11px]">
+          <span className="text-slate-500">
+            Date: <strong>{safeFormat(invoice?.date, 'dd MMM yyyy')}</strong>
+          </span>
+          <span className="uppercase font-bold bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[10px]">
+            {invoice?.payment_method || 'cash'}
+          </span>
+          <span className="text-slate-700">
+            Original: <strong>₹{Number(invoice?.grand_total || 0).toFixed(2)}</strong>
+          </span>
+        </div>
+      </div>
+
+      {detailLoading ? (
+        <div className="flex-1 flex items-center justify-center text-slate-400">Loading invoice…</div>
+      ) : (
+        <>
+          {/* Items grid */}
+          <div className="flex-1 overflow-y-auto min-h-0 p-3">
+            {returnDone && (
+              <div className={`mb-3 rounded-xl px-5 py-4 border ${billAutoCancelled ? 'bg-red-50 border-red-200' : 'bg-emerald-50 border-emerald-200'}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <span className={`font-bold text-base ${billAutoCancelled ? 'text-red-700' : 'text-emerald-700'}`}>
+                    {billAutoCancelled ? '✓ Bill Cancelled · Full Refund Issued' : '✓ Return Complete'}
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-4 max-w-xs">
+                  <div>
+                    <div className="text-xs text-rose-600 font-medium mb-0.5">Refund to customer</div>
+                    <div className="text-lg font-bold text-rose-700">₹{returnRefundAmt.toFixed(2)}</div>
+                  </div>
+                  {!billAutoCancelled && (
+                    <div>
+                      <div className="text-xs text-emerald-600 font-medium mb-0.5">New bill total</div>
+                      <div className="text-lg font-bold text-emerald-700">₹{Number(updatedInvoice?.grand_total || 0).toFixed(2)}</div>
+                    </div>
+                  )}
+                  {billAutoCancelled && (
+                    <div>
+                      <div className="text-xs text-red-600 font-medium mb-0.5">Bill status</div>
+                      <div className="text-sm font-bold text-red-700">Cancelled</div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {displayItems.some((it) => it.batch === null) && (
+              <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+                One or more items have deleted inventory batches. Confirming this return will automatically recreate those batches in inventory.
+              </div>
+            )}
+
+            {!returnDone && isFullBillReturn(selectedInvoice || {}, returnQtyById) && (
+              <div className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 mb-2">
+                Returning all items will automatically cancel this bill.
+              </div>
+            )}
+
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+              <table className="w-full text-left text-[11px]">
+                <thead className="bg-gradient-to-b from-slate-100 to-slate-50 sticky top-0 text-[10px] font-bold text-slate-500 uppercase">
+                  <tr>
+                    <th className="px-3 py-2">Medicine</th>
+                    <th className="px-3 py-2">Batch</th>
+                    <th className="px-3 py-2">Expiry</th>
+                    <th className="px-3 py-2 text-right">Pack</th>
+                    <th className="px-3 py-2 text-right">Sold Qty</th>
+                    <th className="px-3 py-2 text-right">Rate</th>
+                    {invoice?.gst_enabled && (
+                      <th className="px-3 py-2 text-right">GST%</th>
+                    )}
+                    <th className="px-3 py-2 text-right">Line Amt</th>
+                    {!returnDone && (
+                      <>
+                        <th className="px-3 py-2 text-center bg-rose-50 text-rose-700">Return Qty</th>
+                        <th className="px-3 py-2 text-right bg-rose-50 text-rose-700">Refund</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {displayItems.length === 0 ? (
+                    <tr>
+                      <td colSpan={returnDone ? 8 : 10} className="px-3 py-8 text-center text-slate-400">
+                        {billAutoCancelled ? 'Bill cancelled — all items returned.' : returnDone ? 'All items returned. Bill is now empty.' : 'No items'}
+                      </td>
+                    </tr>
+                  ) : displayItems.map((item) => {
+                    const soldQty = Number(item.qty || 0)
+                    const rQty = returnQtyById[item.id] ?? 0
+                    const refund = calcLineRefund(item, rQty, invoice?.gst_enabled)
+                    const lineAmt = Number(item.amount || 0)
+                    const batchNo = item.batch_no || item.snapshot_batch_no || '—'
+                    const expiry = item.expiry_date || item.snapshot_expiry_date
+                    const gstPct = Number(item.cgst_rate || 0) + Number(item.sgst_rate || 0)
+                    const packSize = Number(packSizeFromInvoiceItem(item)) || 1
+                    const baseSuffix = qtySuffixFromMedicine(item.medicine_print || item.medicine_name)
+                    const soldQtyLabel = formatBillQtyForOutlet({
+                      mode: 'pack_and_loose',
+                      qty: soldQty,
+                      freeQty: item.free_qty || 0,
+                      packSize,
+                      baseSuffix,
+                    })
+                    const packInfo = item.medicine_print?.pack_info || (packSize > 1 ? `1×${packSize}` : '—')
+                    return (
+                      <tr key={item.id} className={rQty > 0 ? 'bg-rose-50/50' : 'hover:bg-slate-50/60'}>
+                        <td className="px-3 py-2 font-medium text-slate-900">
+                          {item.medicine_name || item.medicine_print || '—'}
+                          {item.batch === null && (
+                            <span className="ml-1 text-[9px] font-semibold text-amber-700 bg-amber-50 border border-amber-200 rounded px-1 whitespace-nowrap">
+                              batch deleted · will auto-restore
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 font-mono text-slate-600">{batchNo}</td>
+                        <td className="px-3 py-2 text-slate-500">{expiry ? safeFormat(expiry, 'MM/yy') : '—'}</td>
+                        <td className="px-3 py-2 text-right text-slate-500 font-mono text-[10px]">{packInfo}</td>
+                        <td className="px-3 py-2 text-right font-semibold">
+                          <div>{soldQtyLabel}</div>
+                          {packSize > 1 && (
+                            <div className="text-[9px] text-slate-400 font-normal">({soldQty} units)</div>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 text-right">₹{Number(item.rate || 0).toFixed(2)}</td>
+                        {invoice?.gst_enabled && (
+                          <td className="px-3 py-2 text-right text-slate-500">{gstPct}%</td>
+                        )}
+                        <td className="px-3 py-2 text-right font-semibold">₹{lineAmt.toFixed(2)}</td>
+                        {!returnDone && (
+                          <>
+                            <td className="px-3 py-2 text-center bg-rose-50/40">
+                              {packSize <= 1 ? (
+                                <>
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={soldQty}
+                                    step="1"
+                                    value={rQty === 0 ? '' : rQty}
+                                    placeholder={soldQty > 0 ? String(soldQty) : '0'}
+                                    onChange={(e) => {
+                                      const raw = Number(e.target.value)
+                                      const over = raw > soldQty
+                                      setReturnOverById((prev) => ({ ...prev, [item.id]: over }))
+                                      const capped = Math.min(Math.max(0, isNaN(raw) ? 0 : raw), soldQty)
+                                      setReturnQtyById((prev) => ({ ...prev, [item.id]: capped }))
+                                    }}
+                                    className={`w-16 text-center border rounded px-1 py-0.5 text-[11px] bg-white focus:outline-none ${returnOverById[item.id] ? 'border-red-500 focus:border-red-500' : 'border-rose-300 focus:border-rose-500'}`}
+                                  />
+                                  {returnOverById[item.id] && (
+                                    <div className="text-[9px] text-red-600 mt-0.5">Max: {soldQty}</div>
+                                  )}
+                                </>
+                              ) : (
+                                <div className="flex flex-col items-center gap-0.5">
+                                  <div className="flex items-center gap-1 justify-center">
+                                    <div className="flex flex-col items-center">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        step="1"
+                                        placeholder="0"
+                                        value={returnDisplayById[item.id]?.strips ?? ''}
+                                        onChange={(e) => {
+                                          const strips = Math.max(0, parseInt(e.target.value) || 0)
+                                          const loose = parseInt(returnDisplayById[item.id]?.loose) || 0
+                                          const over = strips * packSize + loose > soldQty
+                                          setReturnOverById((prev) => ({ ...prev, [item.id]: over }))
+                                          const base = Math.min(strips * packSize + loose, soldQty)
+                                          setReturnDisplayById((prev) => ({ ...prev, [item.id]: { strips: String(strips), loose: prev[item.id]?.loose ?? '' } }))
+                                          setReturnQtyById((prev) => ({ ...prev, [item.id]: base }))
+                                        }}
+                                        className={`w-12 text-center border rounded px-1 py-0.5 text-[11px] bg-white focus:outline-none ${returnOverById[item.id] ? 'border-red-500 focus:border-red-500' : 'border-rose-300 focus:border-rose-500'}`}
+                                      />
+                                      <span className="text-[8px] text-slate-400 leading-tight">strips</span>
+                                    </div>
+                                    <span className="text-slate-400 text-[10px] pb-3">+</span>
+                                    <div className="flex flex-col items-center">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        step="1"
+                                        placeholder="0"
+                                        value={returnDisplayById[item.id]?.loose ?? ''}
+                                        onChange={(e) => {
+                                          const loose = Math.max(0, parseInt(e.target.value) || 0)
+                                          const strips = parseInt(returnDisplayById[item.id]?.strips) || 0
+                                          const over = strips * packSize + loose > soldQty
+                                          setReturnOverById((prev) => ({ ...prev, [item.id]: over }))
+                                          const base = Math.min(strips * packSize + loose, soldQty)
+                                          setReturnDisplayById((prev) => ({ ...prev, [item.id]: { strips: prev[item.id]?.strips ?? '', loose: String(loose) } }))
+                                          setReturnQtyById((prev) => ({ ...prev, [item.id]: base }))
+                                        }}
+                                        className={`w-12 text-center border rounded px-1 py-0.5 text-[11px] bg-white focus:outline-none ${returnOverById[item.id] ? 'border-red-500 focus:border-red-500' : 'border-rose-300 focus:border-rose-500'}`}
+                                      />
+                                      <span className="text-[8px] text-slate-400 leading-tight">units</span>
+                                    </div>
+                                  </div>
+                                  {returnOverById[item.id] && (
+                                    <div className="text-[9px] text-red-600">Max: {soldQty} units</div>
+                                  )}
+                                </div>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right bg-rose-50/40 font-semibold text-rose-700">
+                              {refund > 0 ? `₹${refund.toFixed(2)}` : '—'}
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Sticky footer */}
+          <div className="shrink-0 bg-white border-t border-slate-200 px-4 py-3">
+            {!returnDone ? (
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex flex-wrap gap-4 text-xs">
+                  <div className="rounded border border-slate-200 px-3 py-2 min-w-[100px]">
+                    <div className="text-slate-500">New subtotal</div>
+                    <div className="font-bold">₹{newSubtotal.toFixed(2)}</div>
+                  </div>
+                  {gstEnabled && (
+                    <>
+                      <div className="rounded border border-slate-200 px-3 py-2 min-w-[80px]">
+                        <div className="text-slate-500">CGST</div>
+                        <div className="font-bold">₹{newCgst.toFixed(2)}</div>
+                      </div>
+                      <div className="rounded border border-slate-200 px-3 py-2 min-w-[80px]">
+                        <div className="text-slate-500">SGST</div>
+                        <div className="font-bold">₹{newSgst.toFixed(2)}</div>
+                      </div>
+                    </>
+                  )}
+                  <div className="rounded border border-slate-200 px-3 py-2 min-w-[100px]">
+                    <div className="text-slate-500">New total</div>
+                    <div className="font-bold">₹{newPayableTotal.toFixed(2)}</div>
+                  </div>
+                  <div className="rounded border border-rose-300 bg-rose-50 px-3 py-2 min-w-[120px]">
+                    <div className="text-rose-600 font-semibold">Total refund</div>
+                    <div className="font-bold text-rose-700 text-sm">₹{totalRefund.toFixed(2)}</div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={submitReturn}
+                  disabled={submitting || totalRefund <= 0}
+                  className={`flex items-center gap-2 px-5 py-2 bg-rose-600 hover:bg-rose-700 text-white rounded-lg font-semibold text-sm transition-colors disabled:opacity-50 ${Object.values(returnOverById).some(Boolean) ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  <ReturnIcon size={16} />
+                  {submitting ? 'Processing…' : 'Confirm Return'}
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className={`text-sm font-semibold ${billAutoCancelled ? 'text-red-700' : 'text-emerald-700'}`}>
+                  {billAutoCancelled ? 'Stock restored · Bill cancelled.' : 'Stock restored · Bill updated.'}
+                </div>
+                <div className="flex gap-2">
+                  {!billAutoCancelled && (
+                    <button
+                      type="button"
+                      onClick={() => onPrint?.(updatedInvoice || selectedInvoice)}
+                      className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm"
+                    >
+                      <PrintIcon size={16} /> Print Updated Bill
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      setScreen('invoices')
+                      setSelectedInvoice(null)
+                      setReturnQtyById({})
+                      setReturnDisplayById({})
+                      setReturnOverById({})
+                      setFullCancelModal(null)
+                      setBillAutoCancelled(false)
+                      setReturnDone(false)
+                      setUpdatedInvoice(null)
+                      setReturnRefundAmt(0)
+                      if (selectedPatient) await loadPatientInvoices(selectedPatient, true)
+                    }}
+                    className="px-4 py-2 border border-slate-200 hover:bg-slate-50 rounded-lg text-sm font-medium text-slate-700"
+                  >
+                    Back to Invoices
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {fullCancelModal && createPortal(
+        <ReturnFullBillCancelModal
+          invoice={fullCancelModal.invoice}
+          refundAmt={fullCancelModal.refundAmt}
+          processing={Boolean(fullCancelModal.processing)}
+          onConfirm={confirmFullBillCancel}
+          onClose={() => setFullCancelModal(null)}
+        />,
+        document.body,
+      )}
     </div>
   )
 }

@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if success %}Application Submitted{% else %}Apply for {{ job.title }}{% endif %}</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 40px 20px;
+        }
+        .container {
+            max-width: 700px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+        }
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+        .header p {
+            opacity: 0.9;
+            text-align: center;
+            font-size: 16px;
+        }
+        .header-meta {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin-top: 14px;
+        }
+        .header-meta > span {
+            background: rgba(255, 255, 255, 0.18);
+            border: 1px solid rgba(255, 255, 255, 0.28);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 4px 10px;
+            border-radius: 999px;
+        }
+        .header-meta .meta-label {
+            font-weight: 600;
+            opacity: 0.9;
+            margin-right: 4px;
+        }
+        .header-meta .meta-label::after {
+            content: ':';
+        }
+        .page-steps {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            margin-bottom: 24px;
+        }
+        .page-step {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: #fff;
+            border: 1px solid #e5e7eb;
+            color: #6b7280;
+            font-size: 12px;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: 999px;
+        }
+        .page-step-num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #eef2ff;
+            color: #4f46e5;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .job-details {
+            padding: 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e9ecef;
+        }
+        .job-details h2 {
+            color: #374151;
+            margin-bottom: 20px;
+            font-size: 18px;
+            font-weight: 600;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        .job-details-list {
+            list-style: disc;
+            padding-left: 1.25rem;
+            margin: 0;
+            color: #4b5563;
+            font-size: 14px;
+            line-height: 1.7;
+        }
+        .job-details-list li {
+            margin-bottom: 6px;
+        }
+        .job-details-list li:last-child {
+            margin-bottom: 0;
+        }
+        .job-details-list strong {
+            color: #374151;
+            font-weight: 600;
+        }
+        .job-details-list + .job-details-list {
+            margin-top: 16px;
+        }
+        .details-block .job-details-list {
+            margin-top: 0;
+        }
+        .details-block {
+            margin-bottom: 16px;
+            padding: 16px;
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+        }
+        .details-block:last-child {
+            margin-bottom: 0;
+        }
+        .details-block h3 {
+            color: #374151;
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-badge {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 22px;
+            height: 22px;
+            padding: 0 6px;
+            border-radius: 999px;
+            background: #eef2ff;
+            color: #4f46e5;
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .details-block-desc {
+            color: #6b7280;
+            font-size: 13px;
+            margin: -4px 0 10px;
+            line-height: 1.5;
+        }
+        .form-section {
+            padding: 30px;
+        }
+        .form-section h2 {
+            color: #374151;
+            margin-bottom: 25px;
+            font-size: 18px;
+            font-weight: 600;
+            text-align: center;
+            padding-bottom: 12px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        .form-block {
+            margin-bottom: 24px;
+            padding: 20px;
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 10px;
+        }
+        .form-block:last-of-type {
+            margin-bottom: 28px;
+        }
+        .form-block h3 {
+            color: #374151;
+            font-size: 15px;
+            font-weight: 600;
+            margin-bottom: 6px;
+            padding-bottom: 0;
+            border-bottom: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .form-block-desc {
+            color: #6b7280;
+            font-size: 13px;
+            margin: 0 0 18px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid #e5e7eb;
+            line-height: 1.5;
+        }
+        .form-group {
+            margin-bottom: 20px;
+        }
+        .form-group label {
+            display: block;
+            color: #374151;
+            font-weight: 500;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+        .form-group input,
+        .form-group textarea,
+        .form-group input[type="file"] {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+            background: #fff;
+        }
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .form-group textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .required {
+            color: #e74c3c;
+        }
+        .field-hint {
+            color: #6b7280;
+            font-weight: normal;
+        }
+        .info-note {
+            margin-bottom: 18px;
+            padding: 12px 14px;
+            background: #eff6ff;
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            color: #1e40af;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+        .info-note ul {
+            margin: 8px 0 0 1.1rem;
+            padding: 0;
+        }
+        .info-note li {
+            margin-bottom: 4px;
+        }
+        .photo-preview {
+            display: none;
+            margin-top: 10px;
+        }
+        .photo-preview.visible {
+            display: block;
+        }
+        .photo-preview img {
+            width: 88px;
+            height: 88px;
+            object-fit: cover;
+            border-radius: 8px;
+            border: 2px solid #e5e7eb;
+        }
+        .file-selected {
+            margin-top: 6px;
+            font-size: 12px;
+            color: #059669;
+        }
+        .submit-btn {
+            width: 100%;
+            padding: 14px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .submit-btn:hover {
+            transform: translateY(-2px);
+        }
+        .submit-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .success-only {
+            padding: 56px 40px;
+            text-align: center;
+        }
+        .success-only-icon {
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 24px;
+            border-radius: 50%;
+            background: #ecfdf5;
+            border: 2px solid #a7f3d0;
+            color: #059669;
+            font-size: 36px;
+            line-height: 68px;
+            font-weight: 700;
+        }
+        .success-only h1 {
+            color: #065f46;
+            font-size: 26px;
+            font-weight: 700;
+            margin-bottom: 16px;
+        }
+        .success-only p {
+            color: #047857;
+            font-size: 16px;
+            line-height: 1.7;
+            max-width: 420px;
+            margin: 0 auto;
+        }
+        .success-message {
+            background: #ecfdf5;
+            color: #065f46;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #a7f3d0;
+            font-size: 14px;
+        }
+        .error-message {
+            background: #fef2f2;
+            color: #991b1b;
+            padding: 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #fecaca;
+            font-size: 14px;
+        }
+        .closed-message {
+            background: #fffbeb;
+            color: #92400e;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border: 1px solid #fde68a;
+            font-size: 15px;
+            text-align: center;
+            line-height: 1.6;
+        }
+        .field-error {
+            color: #e74c3c;
+            font-size: 13px;
+            margin-top: 5px;
+            display: none;
+        }
+        .field-error.visible {
+            display: block;
+        }
+        .form-group input.error,
+        .form-group textarea.error {
+            border-color: #e74c3c;
+        }
+        @media (max-width: 600px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            .form-block {
+                padding: 16px;
+            }
+            .job-details,
+            .form-section {
+                padding: 20px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        {% if success %}
+        <div class="success-only">
+            <div class="success-only-icon" aria-hidden="true">&#10003;</div>
+            <h1>Application submitted</h1>
+            <p>Your application has been submitted successfully. We will contact you soon.</p>
+        </div>
+        {% else %}
+        <div class="header">
+            <h1>Apply for Position</h1>
+            <p>{{ job.title }}</p>
+            <div class="header-meta">
+                {% if job.job_code %}
+                <span><span class="meta-label">Job ID</span>{{ job.job_code }}</span>
+                {% endif %}
+                {% if job.department %}
+                <span><span class="meta-label">Department</span>{{ job.department.name }}</span>
+                {% endif %}
+                {% if job.location %}
+                <span><span class="meta-label">Location</span>{{ job.location }}</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="job-details">
+            <h2>About This Position</h2>
+
+            <div class="details-block">
+                <h3><span class="section-badge">1</span> Role Description</h3>
+                <ul class="job-details-list">
+                    {% if job.description.strip %}
+                        {% for line in job.description.splitlines %}
+                            {% if line.strip %}
+                            <li>{{ line.strip }}</li>
+                            {% endif %}
+                        {% endfor %}
+                    {% else %}
+                        <li>No description provided</li>
+                    {% endif %}
+                </ul>
+            </div>
+
+            <div class="details-block">
+                <h3><span class="section-badge">2</span> Position Details</h3>
+                <ul class="job-details-list">
+                    {% if job.designation %}
+                    <li><strong>Designation:</strong> {{ job.designation.name }}</li>
+                    {% endif %}
+                    {% if job.vacancies %}
+                    <li><strong>Vacancies:</strong> {{ job.vacancies }}</li>
+                    {% endif %}
+                    {% if job.employment_type %}
+                    <li><strong>Employment Type:</strong> {{ job.get_employment_type_display }}</li>
+                    {% endif %}
+                    {% if job.department %}
+                    <li><strong>Department:</strong> {{ job.department.name }}</li>
+                    {% endif %}
+                    {% if job.experience_required %}
+                    <li><strong>Experience Required:</strong> {{ job.experience_required }}</li>
+                    {% endif %}
+                    {% if job.salary_range %}
+                    <li><strong>Salary Range:</strong> {{ job.salary_range }}</li>
+                    {% endif %}
+                    {% if job.location %}
+                    <li><strong>Location:</strong> {{ job.location }}</li>
+                    {% endif %}
+                    {% if job.expiry_date %}
+                    <li><strong>Last Date to Apply:</strong> {{ job.expiry_date|date:"F j, Y" }}</li>
+                    {% endif %}
+                </ul>
+            </div>
+
+            {% if job.required_skills %}
+            <div class="details-block">
+                <h3><span class="section-badge">3</span> Required Skills</h3>
+                <ul class="job-details-list skills-list" data-split-spaces="true">
+                    <span class="skills-source" hidden>{{ job.required_skills }}</span>
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+
+        <div class="form-section">
+            {% if applications_closed %}
+            <div class="closed-message">
+                <strong>{{ applications_closed_title|default:"Applications Closed" }}</strong><br>
+                {{ applications_closed_message|default:"This position is no longer accepting applications." }}
+            </div>
+            {% else %}
+            {% if errors %}
+            <div class="error-message" id="form-validation-summary" role="alert">
+                <strong>Please fix the following and try again.</strong>
+                {% if form_data %}<span> File uploads (resume and photo) must be selected again after a failed submission.</span>{% endif %}
+            </div>
+            {% endif %}
+            {% if error %}
+            <div class="error-message">
+                <strong>Error:</strong> {{ error }}
+            </div>
+            {% endif %}
+
+            <h2>Application Form</h2>
+
+            <div class="page-steps" aria-hidden="true">
+                <span class="page-step"><span class="page-step-num">1</span> Personal Details</span>
+                <span class="page-step"><span class="page-step-num">2</span> Professional Details</span>
+            </div>
+
+            <form method="POST" enctype="multipart/form-data" id="applicationForm" autocomplete="off" novalidate>
+                {% csrf_token %}
+
+                <div class="form-block" id="personalDetailsSection">
+                    <h3><span class="section-badge">1</span> Personal Details</h3>
+                    <p class="form-block-desc">Your contact information and address for this application.</p>
+
+                    <div class="form-group">
+                        <label>Full Name <span class="required">*</span></label>
+                        <input type="text" name="name" required minlength="2" value="{{ form_data.name|default:'' }}" id="name">
+                        <div class="field-error" id="name-error"></div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Email <span class="required">*</span></label>
+                            <input type="email" name="email" required value="{{ form_data.email|default:'' }}" id="email">
+                            <div class="field-error" id="email-error"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Phone <span class="required">*</span></label>
+                            <input type="tel" name="phone" required pattern="[0-9]{10}" value="{{ form_data.phone|default:'' }}" id="phone">
+                            <div class="field-error" id="phone-error"></div>
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Gender <span class="required">*</span></label>
+                        <select name="gender" required id="gender">
+                            <option value="" {% if not form_data.gender %}selected{% endif %} disabled>Select gender</option>
+                            <option value="male" {% if form_data.gender == 'male' %}selected{% endif %}>Male</option>
+                            <option value="female" {% if form_data.gender == 'female' %}selected{% endif %}>Female</option>
+                            <option value="other" {% if form_data.gender == 'other' %}selected{% endif %}>Other</option>
+                        </select>
+                        <div class="field-error" id="gender-error"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Full Address <span class="required">*</span></label>
+                        <textarea name="address" placeholder="Enter your complete address (street, city, state, zip code, country)..." required style="min-height: 80px;" id="address">{{ form_data.address|default:'' }}</textarea>
+                        <div class="field-error" id="address-error"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Passport Size Photo <span class="field-hint">(Optional — JPG, PNG, or WEBP, max 2MB)</span></label>
+                        <input type="file" name="passport_photo" accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp" id="passport_photo">
+                        <div class="photo-preview" id="photoPreview"><img id="photoPreviewImg" alt="Passport photo preview"></div>
+                        <div class="field-error" id="passport_photo-error"></div>
+                    </div>
+                </div>
+
+                <div class="form-block" id="professionalDetailsSection">
+                    <h3><span class="section-badge">2</span> Professional Details</h3>
+                    <p class="form-block-desc">Your experience, documents, and preferences for this role.</p>
+
+                    {% if job.document_requirements.all %}
+                    <div class="info-note">
+                        <strong>Documents you may need later</strong>
+                        <ul>
+                            {% for req in job.document_requirements.all %}
+                            <li>{{ req.document_type.name }}{% if req.is_required %} (required){% else %} (optional){% endif %}</li>
+                            {% endfor %}
+                        </ul>
+                    </div>
+                    {% endif %}
+
+                    <div class="form-group">
+                        <label>Resume/CV <span class="required">*</span> <span class="field-hint">(PDF only, max 5MB)</span></label>
+                        <input type="file" name="resume" accept=".pdf" required id="resume">
+                        <div class="file-selected" id="resumeFileName" hidden></div>
+                        <div class="field-error" id="resume-error"></div>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Cover Letter</label>
+                        <textarea name="cover_letter" placeholder="Tell us why you're a great fit for this role...">{{ form_data.cover_letter|default:'' }}</textarea>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Experience</label>
+                            <input type="text" name="experience" placeholder="e.g., 3 years" value="{{ form_data.experience|default:'' }}" id="experience">
+                            <div class="field-error" id="experience-error"></div>
+                        </div>
+                        <div class="form-group">
+                            <label>Current organisation</label>
+                            <input type="text" name="current_company" value="{{ form_data.current_company|default:'' }}">
+                        </div>
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label>Expected Salary</label>
+                            <input type="text" name="expected_salary" placeholder="e.g., ₹60000" value="{{ form_data.expected_salary|default:'' }}">
+                        </div>
+                        <div class="form-group">
+                            <label>Notice Period</label>
+                            <input type="text" name="notice_period" placeholder="e.g., 30 days" value="{{ form_data.notice_period|default:'' }}">
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="submit-btn" id="submitBtn">Submit Application</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+    {% if not success %}
+    <div id="backend-errors" style="display:none;" data-errors="{{ errors|default:''|escapejs }}"></div>
+    <script>
+        (function() {
+            try {
+                localStorage.removeItem('curevice_apply_draft_{{ job.job_code }}');
+            } catch (e) { /* ignore */ }
+        })();
+
+        // Display backend errors if any
+        document.addEventListener('DOMContentLoaded', function() {
+            const errorsDiv = document.getElementById('backend-errors');
+            const errors = errorsDiv ? errorsDiv.dataset.errors : null;
+            if (errors) {
+                try {
+                    const errorObj = JSON.parse(errors);
+                    for (const [field, message] of Object.entries(errorObj)) {
+                        const errorElement = document.getElementById(`${field}-error`);
+                        const inputElement = document.getElementById(field);
+                        if (errorElement && inputElement) {
+                            errorElement.textContent = message;
+                            errorElement.classList.add('visible');
+                            inputElement.classList.add('error');
+                        }
+                    }
+                } catch (e) {
+                    console.error('Error parsing backend errors:', e);
+                }
+            }
+            scrollToFirstError();
+        });
+
+        function showError(field, message) {
+            const errorElement = document.getElementById(`${field}-error`);
+            const inputElement = document.getElementById(field);
+            if (errorElement && inputElement) {
+                errorElement.textContent = message;
+                errorElement.classList.add('visible');
+                inputElement.classList.add('error');
+            }
+        }
+
+        function clearError(field) {
+            const errorElement = document.getElementById(`${field}-error`);
+            const inputElement = document.getElementById(field);
+            if (errorElement && inputElement) {
+                errorElement.textContent = '';
+                errorElement.classList.remove('visible');
+                inputElement.classList.remove('error');
+            }
+        }
+
+        function scrollToFirstError() {
+            const firstError = document.querySelector('.field-error.visible');
+            if (!firstError) return;
+            const group = firstError.closest('.form-group') || firstError.closest('.form-block');
+            if (group) {
+                group.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function updateResumeFileName() {
+            const resume = document.getElementById('resume');
+            const label = document.getElementById('resumeFileName');
+            if (!resume || !label) return;
+            const file = resume.files[0];
+            if (file) {
+                label.textContent = 'Selected: ' + file.name;
+                label.hidden = false;
+            } else {
+                label.textContent = '';
+                label.hidden = true;
+            }
+        }
+
+        function updatePhotoPreview() {
+            const input = document.getElementById('passport_photo');
+            const preview = document.getElementById('photoPreview');
+            const img = document.getElementById('photoPreviewImg');
+            if (!input || !preview || !img) return;
+            const file = input.files[0];
+            if (!file) {
+                preview.classList.remove('visible');
+                img.removeAttribute('src');
+                return;
+            }
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                img.src = e.target.result;
+                preview.classList.add('visible');
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function validateName() {
+            const name = document.getElementById('name');
+            if (!name.value.trim()) {
+                showError('name', 'Name is required');
+                return false;
+            } else if (name.value.trim().length < 2) {
+                showError('name', 'Name must be at least 2 characters');
+                return false;
+            }
+            clearError('name');
+            return true;
+        }
+
+        function validateEmail() {
+            const email = document.getElementById('email');
+            const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+            if (!email.value.trim()) {
+                showError('email', 'Email is required');
+                return false;
+            } else if (!emailRegex.test(email.value.trim())) {
+                showError('email', 'Please enter a valid email address');
+                return false;
+            }
+            clearError('email');
+            return true;
+        }
+
+        function validatePhone() {
+            const phone = document.getElementById('phone');
+            const phoneRegex = /^\d{10}$/;
+            if (!phone.value.trim()) {
+                showError('phone', 'Phone number is required');
+                return false;
+            } else if (!phoneRegex.test(phone.value.trim())) {
+                showError('phone', 'Phone number must be exactly 10 digits');
+                return false;
+            }
+            clearError('phone');
+            return true;
+        }
+
+        function validateGender() {
+            const gender = document.getElementById('gender');
+            const allowed = ['male', 'female', 'other'];
+            if (!gender.value) {
+                showError('gender', 'Gender is required');
+                return false;
+            } else if (!allowed.includes(gender.value)) {
+                showError('gender', 'Please select a valid gender');
+                return false;
+            }
+            clearError('gender');
+            return true;
+        }
+
+        function validateExperience() {
+            const experience = document.getElementById('experience');
+            if (experience.value.trim() && experience.value.trim().length > 50) {
+                showError('experience', 'Experience must be less than 50 characters');
+                return false;
+            }
+            clearError('experience');
+            return true;
+        }
+
+        function validateAddress() {
+            const address = document.getElementById('address');
+            if (!address.value.trim()) {
+                showError('address', 'Address is required');
+                return false;
+            }
+            clearError('address');
+            return true;
+        }
+
+        function validateResume() {
+            const resume = document.getElementById('resume');
+            const file = resume.files[0];
+            if (!file) {
+                showError('resume', 'Resume (PDF) is required');
+                return false;
+            } else {
+                const isPDF = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+                if (!isPDF) {
+                    showError('resume', 'Only PDF files are allowed');
+                    return false;
+                }
+                if (file.size > 5 * 1024 * 1024) {
+                    showError('resume', 'Resume file size must be less than 5MB');
+                    return false;
+                }
+            }
+            clearError('resume');
+            updateResumeFileName();
+            return true;
+        }
+
+        function validatePassportPhoto() {
+            const input = document.getElementById('passport_photo');
+            if (!input) return true;
+            const file = input.files[0];
+            if (!file) {
+                clearError('passport_photo');
+                updatePhotoPreview();
+                return true;
+            }
+            const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+            const allowedExt = ['.jpg', '.jpeg', '.png', '.webp'];
+            const lowerName = file.name.toLowerCase();
+            const isImage = allowedTypes.includes(file.type) || allowedExt.some((ext) => lowerName.endsWith(ext));
+            if (!isImage) {
+                showError('passport_photo', 'Only JPG, PNG, or WEBP images are allowed');
+                return false;
+            }
+            if (file.size > 2 * 1024 * 1024) {
+                showError('passport_photo', 'Passport photo file size must be less than 2MB');
+                return false;
+            }
+            clearError('passport_photo');
+            updatePhotoPreview();
+            return true;
+        }
+
+        // Add real-time validation on blur
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('applicationForm');
+            if (!form) return;
+
+            document.getElementById('name').addEventListener('blur', validateName);
+            document.getElementById('email').addEventListener('blur', validateEmail);
+            document.getElementById('phone').addEventListener('blur', validatePhone);
+            document.getElementById('gender').addEventListener('change', validateGender);
+            document.getElementById('experience').addEventListener('blur', validateExperience);
+            document.getElementById('address').addEventListener('blur', validateAddress);
+            document.getElementById('resume').addEventListener('change', validateResume);
+            document.getElementById('passport_photo').addEventListener('change', validatePassportPhoto);
+
+            // Validate on form submit
+            form.addEventListener('submit', function(e) {
+                const isNameValid = validateName();
+                const isEmailValid = validateEmail();
+                const isPhoneValid = validatePhone();
+                const isGenderValid = validateGender();
+                const isExperienceValid = validateExperience();
+                const isAddressValid = validateAddress();
+                const isResumeValid = validateResume();
+                const isPassportPhotoValid = validatePassportPhoto();
+
+                if (!isNameValid || !isEmailValid || !isPhoneValid || !isGenderValid || !isExperienceValid || !isAddressValid || !isResumeValid || !isPassportPhotoValid) {
+                    e.preventDefault();
+                    scrollToFirstError();
+                    return false;
+                }
+                const submitBtn = document.getElementById('submitBtn');
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                    submitBtn.textContent = 'Submitting…';
+                }
+            });
+        });
+
+    </script>
+    {% endif %}
+    <script>
+        (function() {
+            function parseTags(raw, splitSpaces) {
+                if (!raw || !String(raw).trim()) return [];
+                var parts = String(raw).split(/[,;\n]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+                if (splitSpaces && parts.length === 1) {
+                    return parts[0].split(/\s+/).filter(Boolean);
+                }
+                return parts;
+            }
+            document.querySelectorAll('.skills-list[data-split-spaces]').forEach(function(el) {
+                var source = el.querySelector('.skills-source');
+                var splitSpaces = el.getAttribute('data-split-spaces') === 'true';
+                var raw = source ? source.textContent : '';
+                var tags = parseTags(raw, splitSpaces);
+                if (!tags.length) return;
+                el.innerHTML = tags.map(function(tag) {
+                    var safe = tag
+                        .replace(/&/g, '&amp;')
+                        .replace(/</g, '&lt;')
+                        .replace(/>/g, '&gt;');
+                    return '<li>' + safe + '</li>';
+                }).join('');
+            });
+        })();
+    </script>
+</body>
+</html>

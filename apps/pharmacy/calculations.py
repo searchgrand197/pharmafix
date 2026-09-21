@@ -3,8 +3,22 @@
 from __future__ import annotations
 
 import re
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Literal, TypedDict
+
+TWO_PLACES = Decimal("0.01")
+
+
+def invoice_round_off(amount: Decimal) -> tuple[Decimal, Decimal]:
+    """
+    Retail bill round-off: settle in whole rupees, nearest rupee (0.50 rounds up).
+
+    Returns (payable, round_off) where round_off = payable - amount, i.e. the paise
+    adjustment shown on the bill. Mirrors computeInvoiceRoundOff() in the frontend.
+    """
+    exact = Decimal(amount or 0).quantize(TWO_PLACES)
+    payable = exact.quantize(Decimal("1"), rounding=ROUND_HALF_UP).quantize(TWO_PLACES)
+    return payable, (payable - exact).quantize(TWO_PLACES)
 
 
 def _tablets_per_strip_from_pack_info(pack_info: str) -> int | None:

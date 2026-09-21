@@ -1,5 +1,6 @@
 import DischargePrescriptionPanel from '../DischargePrescriptionPanel'
 import DischargeSuggestibleInput from './DischargeSuggestibleInput'
+import { AmPmTimeInput, FormattedDateInput, toHtmlTimeValue } from '../DateTimeInputs'
 import {
   DISCHARGE_ADVICE_FIELDS,
   DISCHARGE_COURSE_FIELDS,
@@ -63,10 +64,38 @@ export default function DischargeClinicalForm({
             />
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <div><span className={dsLbl}>Discharge date</span><input type="date" value={summary.discharge_date || ''} onChange={(e) => setField('discharge_date', e.target.value)} className={dsInp} /></div>
-            <div><span className={dsLbl}>Discharge time</span><input type="time" value={summary.discharge_time || ''} onChange={(e) => setField('discharge_time', e.target.value)} className={dsInp} /></div>
-            <div><span className={dsLbl}>Next follow-up</span><input type="date" value={summary.next_follow_up_date || ''} onChange={(e) => setField('next_follow_up_date', e.target.value)} className={dsInp} /></div>
-            <div><span className={dsLbl}>Stitch removal</span><input type="date" value={summary.stitch_removal_date || ''} onChange={(e) => setField('stitch_removal_date', e.target.value)} className={dsInp} /></div>
+            <div>
+              <span className={dsLbl}>Discharge date</span>
+              <FormattedDateInput
+                value={summary.discharge_date || ''}
+                onChange={(v) => setField('discharge_date', v)}
+                className={dsInp}
+              />
+            </div>
+            <div className="min-w-0 sm:col-span-1">
+              <span className={dsLbl}>Discharge time</span>
+              <AmPmTimeInput
+                value={toHtmlTimeValue(summary.discharge_time)}
+                onChange={(v) => setField('discharge_time', v)}
+                selectClassName={dsInp}
+              />
+            </div>
+            <div>
+              <span className={dsLbl}>Next follow-up</span>
+              <FormattedDateInput
+                value={summary.next_follow_up_date || ''}
+                onChange={(v) => setField('next_follow_up_date', v)}
+                className={dsInp}
+              />
+            </div>
+            <div>
+              <span className={dsLbl}>Stitch removal</span>
+              <FormattedDateInput
+                value={summary.stitch_removal_date || ''}
+                onChange={(v) => setField('stitch_removal_date', v)}
+                className={dsInp}
+              />
+            </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
             <DischargeSuggestibleInput label="Treating consultant" value={summary.treating_consultant} onChange={(v) => setField('treating_consultant', v)} suggestions={getSuggestions('treating_consultant')} className={dsInp} />
@@ -98,22 +127,6 @@ export default function DischargeClinicalForm({
         </div>
       </details>
 
-      <details id={sid('vitals')} open className="scroll-mt-3 bg-white rounded-xl border border-slate-200 shadow-sm">
-        <summary className="px-3 py-2 cursor-pointer text-xs font-black uppercase tracking-wide text-slate-600 bg-slate-100 hover:bg-slate-200/80">Vitals at discharge</summary>
-        <div className="px-4 sm:px-5 py-4 grid grid-cols-3 sm:grid-cols-6 gap-4 bg-slate-50/70 border-t border-slate-200">
-          {DISCHARGE_VITAL_FIELDS.map((k) => (
-            <DischargeSuggestibleInput
-              key={k}
-              label={k === 'bp' ? 'BP' : k.toUpperCase()}
-              value={(summary.vitals_at_discharge || {})[k] || ''}
-              onChange={(v) => setVital(k, v)}
-              suggestions={getSuggestions(k, 'vitals')}
-              className={dsInp}
-            />
-          ))}
-        </div>
-      </details>
-
       {summary.discharge_type === 'death' && (
         <details id={sid('death')} open className="scroll-mt-3 bg-red-50 rounded-xl border border-red-200 shadow-sm">
           <summary className="px-3 py-2 cursor-pointer text-xs font-black uppercase tracking-wide text-red-800 bg-red-100">Death summary</summary>
@@ -133,9 +146,37 @@ export default function DischargeClinicalForm({
         <div className="px-5 py-5 space-y-5 bg-slate-50/70 border-t border-slate-200">
           <DischargeSuggestibleInput label="Discharge summary / overview" value={summary.summary_notes} onChange={(v) => setField('summary_notes', v)} suggestions={getSuggestions('summary_notes')} multiline placeholder="Brief overview..." className={dsInp} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {DISCHARGE_NARRATIVE_FIELDS.filter(([k]) => k !== 'summary_notes').map(([k, l]) => (
-              <DischargeSuggestibleInput key={k} label={l} value={summary[k]} onChange={(v) => setField(k, v)} suggestions={getSuggestions(k)} multiline className={dsInp} />
-            ))}
+            {DISCHARGE_NARRATIVE_FIELDS.filter(([k]) => k !== 'summary_notes').map(([k, l]) => {
+              if (k === 'physical_examination') {
+                return (
+                  <div key={k} className="md:col-span-2">
+                    <span className={dsLbl}>{l}</span>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-4 mt-2 mb-3">
+                      {DISCHARGE_VITAL_FIELDS.map((vk) => (
+                        <DischargeSuggestibleInput
+                          key={vk}
+                          label={vk === 'bp' ? 'BP' : vk.toUpperCase()}
+                          value={(summary.vitals_at_discharge || {})[vk] || ''}
+                          onChange={(v) => setVital(vk, v)}
+                          suggestions={getSuggestions(vk, 'vitals')}
+                          className={dsInp}
+                        />
+                      ))}
+                    </div>
+                    <DischargeSuggestibleInput
+                      value={summary.physical_examination}
+                      onChange={(v) => setField('physical_examination', v)}
+                      suggestions={getSuggestions('physical_examination')}
+                      multiline
+                      className={dsInp}
+                    />
+                  </div>
+                )
+              }
+              return (
+                <DischargeSuggestibleInput key={k} label={l} value={summary[k]} onChange={(v) => setField(k, v)} suggestions={getSuggestions(k)} multiline className={dsInp} />
+              )
+            })}
           </div>
         </div>
       </details>
@@ -143,7 +184,14 @@ export default function DischargeClinicalForm({
       <details id={sid('operative')} open className="scroll-mt-3 bg-white rounded-xl border border-slate-200 shadow-sm">
         <summary className="px-3 py-2 cursor-pointer text-xs font-black uppercase tracking-wide text-slate-600 bg-slate-100 hover:bg-slate-200/80">Operative / procedure</summary>
         <div className="px-5 py-5 grid grid-cols-1 md:grid-cols-2 gap-6 bg-slate-50/70 border-t border-slate-200">
-          <div><span className={dsLbl}>Surgery date</span><input type="date" value={surgeryDraft.surgery_date || ''} onChange={(e) => updateSurgeryDraftField('surgery_date', e.target.value)} className={dsInp} /></div>
+          <div>
+            <span className={dsLbl}>Surgery date</span>
+            <FormattedDateInput
+              value={surgeryDraft.surgery_date || ''}
+              onChange={(v) => updateSurgeryDraftField('surgery_date', v)}
+              className={dsInp}
+            />
+          </div>
           <DischargeSuggestibleInput label="Procedure (short)" value={surgeryDraft.procedure_name} onChange={(v) => updateSurgeryDraftField('procedure_name', v)} suggestions={getSuggestions('procedure_name', 'child_fields')} multiline className={dsInp} />
           <DischargeSuggestibleInput label="Surgeon" value={surgeryDraft.surgeon_name} onChange={(v) => updateSurgeryDraftField('surgeon_name', v)} suggestions={getSuggestions('surgeon_name', 'child_fields')} className={dsInp} />
           <DischargeSuggestibleInput label="Assistant" value={surgeryDraft.assistant_name} onChange={(v) => updateSurgeryDraftField('assistant_name', v)} suggestions={getSuggestions('assistant_name', 'child_fields')} className={dsInp} />
@@ -194,7 +242,13 @@ export default function DischargeClinicalForm({
                     </td>
                     <td className="px-2.5 py-1.5"><input value={row.value} onChange={(e) => updateInvRow(idx, 'value', e.target.value)} className={dsInp} /></td>
                     <td className="px-2.5 py-1.5"><input value={row.reference_range} onChange={(e) => updateInvRow(idx, 'reference_range', e.target.value)} className={dsInp} /></td>
-                    <td className="px-2.5 py-1.5"><input type="date" value={row.test_date || ''} onChange={(e) => updateInvRow(idx, 'test_date', e.target.value)} className={dsInp} /></td>
+                    <td className="px-2.5 py-1.5">
+                      <FormattedDateInput
+                        value={row.test_date || ''}
+                        onChange={(v) => updateInvRow(idx, 'test_date', v)}
+                        className={dsInp}
+                      />
+                    </td>
                     <td className="px-2 py-1.5"><button type="button" onClick={() => removeInvRow(idx)} className="text-red-600 font-bold px-1">×</button></td>
                   </tr>
                 ))}

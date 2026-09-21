@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Onboarding Completed - {{ candidate_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+        }
+
+        .success-container {
+            max-width: 600px;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
+            padding: 3rem;
+            text-align: center;
+        }
+
+        .success-icon {
+            width: 100px;
+            height: 100px;
+            background: #dcfce7;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 1.5rem;
+            animation: scaleIn 0.5s ease-out;
+        }
+
+        .success-icon i {
+            font-size: 3rem;
+            color: #10b981;
+        }
+
+        .success-title {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: #1e293b;
+            margin-bottom: 1rem;
+        }
+
+        .success-message {
+            color: #64748b;
+            margin-bottom: 2rem;
+            line-height: 1.6;
+        }
+
+        .candidate-info {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .info-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .info-value {
+            color: #64748b;
+        }
+
+        .next-steps {
+            background: #f0f9ff;
+            border-left: 4px solid #2563eb;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 2rem;
+            text-align: left;
+        }
+
+        .next-steps h4 {
+            color: #1e40af;
+            margin-bottom: 0.5rem;
+        }
+
+        .next-steps ul {
+            margin: 0;
+            padding-left: 1.2rem;
+        }
+
+        .next-steps li {
+            color: #64748b;
+            margin-bottom: 0.25rem;
+        }
+
+        .home-button {
+            background: #2563eb;
+            color: white;
+            text-decoration: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 500;
+            display: inline-block;
+            transition: background 0.3s ease;
+        }
+
+        .home-button:hover {
+            background: #1d4ed8;
+            color: white;
+        }
+
+        @keyframes scaleIn {
+            from {
+                transform: scale(0);
+                opacity: 0;
+            }
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.6s ease-out;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="success-container fade-in">
+        <div class="success-icon">
+            <i class="fas fa-check"></i>
+        </div>
+        <h1 class="success-title">Onboarding Completed!</h1>
+        <p class="success-message">
+            Congratulations {{ candidate_name }}! Your onboarding process has been completed successfully. 
+            Your documents have been submitted and are currently under review by our HR team.
+        </p>
+
+        <div class="candidate-info">
+            <div class="info-item">
+                <span class="info-label">Name:</span>
+                <span class="info-value">{{ candidate_name }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Position:</span>
+                <span class="info-value">{{ job_title }}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">Status:</span>
+                <span class="info-value">Documents Under Review</span>
+            </div>
+        </div>
+
+        <div class="next-steps">
+            <h4>What Happens Next?</h4>
+            <ul>
+                <li>HR team will review your submitted documents</li>
+                <li>You'll receive an email once documents are verified</li>
+                <li>Further instructions will be provided for your joining date</li>
+                <li>If any document needs correction, we'll contact you</li>
+            </ul>
+        </div>
+
+        <p class="text-muted small">
+            For any queries, please contact HR support at hr@company.com
+        </p>
+
+    </div>
+</body>
+</html>

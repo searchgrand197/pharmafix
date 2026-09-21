@@ -7,6 +7,7 @@ from apps.discharge.models import (
     DischargeSummaryTemplate,
     DischargeSurgery,
 )
+from apps.patients.age_utils import dob_to_age_parts
 
 
 class DischargeMedicationSerializer(serializers.ModelSerializer):
@@ -41,7 +42,11 @@ class DischargeSurgerySerializer(serializers.ModelSerializer):
 class DischargeSummarySerializer(serializers.ModelSerializer):
     patient_name = serializers.SerializerMethodField()
     patient_uhid = serializers.CharField(source="admission.patient.uhid", read_only=True)
+    patient_age = serializers.SerializerMethodField()
+    patient_age_unit = serializers.SerializerMethodField()
+    patient_gender = serializers.CharField(source="admission.patient.gender", read_only=True, default="")
     admission_date = serializers.DateField(source="admission.admission_date", read_only=True)
+    admission_time = serializers.TimeField(source="admission.admission_time", read_only=True, allow_null=True)
     admission_ipd_no = serializers.CharField(source="admission.ipd_no", read_only=True)
     scheme = serializers.UUIDField(source="admission.scheme_id", read_only=True, allow_null=True)
     scheme_name = serializers.SerializerMethodField()
@@ -58,7 +63,11 @@ class DischargeSummarySerializer(serializers.ModelSerializer):
             "hospital",
             "patient_name",
             "patient_uhid",
+            "patient_age",
+            "patient_age_unit",
+            "patient_gender",
             "admission_date",
+            "admission_time",
             "admission_ipd_no",
             "scheme",
             "scheme_name",
@@ -144,6 +153,23 @@ class DischargeSummarySerializer(serializers.ModelSerializer):
             name = " ".join(filter(None, parts)).strip()
             return name or obj.admission.patient.uhid
         return ""
+
+    def _admission_patient(self, obj):
+        return getattr(getattr(obj, "admission", None), "patient", None)
+
+    def get_patient_age(self, obj):
+        patient = self._admission_patient(obj)
+        if not patient:
+            return None
+        value, _unit = dob_to_age_parts(getattr(patient, "dob", None))
+        return value
+
+    def get_patient_age_unit(self, obj):
+        patient = self._admission_patient(obj)
+        if not patient:
+            return "years"
+        _value, unit = dob_to_age_parts(getattr(patient, "dob", None))
+        return unit or "years"
 
 
 class DischargeSummaryTemplateSerializer(serializers.ModelSerializer):

@@ -70,12 +70,12 @@ class ReceptionPortalSettings(TimeStampedModel, UUIDPrimaryKeyModel):
         related_name="default_reception_portal_for_hospitals",
     )
 
-    hospital_name = models.CharField(max_length=200, blank=True, default="Vardraan Hospital")
-    address = models.CharField(max_length=255, blank=True, default="Jind, Haryana, 126102")
-    pin_code = models.CharField(max_length=30, blank=True, default="126102")
-    phone = models.CharField(max_length=40, blank=True, default="+91-XXXXXXXXXX")
-    email = models.CharField(max_length=120, blank=True, default="info@vardraanhospital.com")
-    website = models.CharField(max_length=200, blank=True, default="www.vardraanhospital.com")
+    hospital_name = models.CharField(max_length=200, blank=True, default="")
+    address = models.CharField(max_length=255, blank=True, default="")
+    pin_code = models.CharField(max_length=30, blank=True, default="")
+    phone = models.CharField(max_length=40, blank=True, default="")
+    email = models.CharField(max_length=120, blank=True, default="")
+    website = models.CharField(max_length=200, blank=True, default="")
     hospital_logo = models.ImageField(
         upload_to="hospital_logos/",
         null=True,
@@ -106,7 +106,7 @@ class ReceptionPortalSettings(TimeStampedModel, UUIDPrimaryKeyModel):
     time_display_mode = models.CharField(
         max_length=4,
         choices=TimeDisplayMode.choices,
-        default=TimeDisplayMode.HOUR_24,
+        default=TimeDisplayMode.HOUR_12,
         help_text="Hospital-wide time display: 12 hour or 24 hour.",
     )
     document_number_formats = models.JSONField(
@@ -124,6 +124,11 @@ class ReceptionPortalSettings(TimeStampedModel, UUIDPrimaryKeyModel):
     reception_daily_report_enabled = models.BooleanField(
         default=True,
         help_text="When enabled, reception staff see Daily Report. When disabled, it is admin-only.",
+    )
+    ipd_process_field_config = models.JSONField(
+        blank=True,
+        default=dict,
+        help_text="Hospital IPD Process form builder: field tree, types, layout.",
     )
 
     @staticmethod

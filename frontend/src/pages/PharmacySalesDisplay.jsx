@@ -146,6 +146,14 @@ export default function PharmacySalesDisplay() {
               <span className="tabular-nums">- {fmt(bill.discount)}</span>
             </div>
           )}
+          {Number(bill.roundOff) !== 0 && (
+            <div className="flex justify-between text-slate-500">
+              <span>Round off</span>
+              <span className="tabular-nums">
+                {Number(bill.roundOff) > 0 ? '+ ' : '− '}{fmt(Math.abs(Number(bill.roundOff)))}
+              </span>
+            </div>
+          )}
           <div className="flex justify-between text-3xl font-black pt-3 border-t-2 border-slate-300 text-emerald-600">
             <span>Total</span>
             <span className="tabular-nums">{fmt(bill.grandTotal)}</span>

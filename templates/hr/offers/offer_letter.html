@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8"/>
+<title>Offer Letter</title>
+
+<style>
+    /* ── PAGE SETUP ── */
+    @page {
+        size: A4;
+        margin-top: 130px;    /* space for fixed header */
+        margin-bottom: 55px;  /* space for fixed footer */
+        margin-left: 50px;
+        margin-right: 50px;
+    }
+
+    body {
+        font-family: 'Helvetica', 'Arial', sans-serif;
+        font-size: 11px;
+        color: #333;
+        line-height: 1.55;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* ─────────────────────────────────────────
+       HEADER  –  position: fixed repeats on every page
+    ───────────────────────────────────────── */
+    #page-header {
+        position: fixed;
+        top: -130px;          /* pull into the top margin */
+        left: -50px;          /* span full page width */
+        right: -50px;
+        height: 130px;
+    }
+
+    .header-table {
+        width: 100%;
+        border-collapse: collapse;
+        table-layout: fixed;
+    }
+
+    .header-logo-cell {
+        width: 38%;
+        background-color: #ffffff;
+        padding: 10px 18px;
+        vertical-align: middle;
+        text-align: left;
+    }
+
+    .header-brand-cell {
+        width: 62%;
+        background-color: #3c415e;
+        vertical-align: middle;
+        padding: 10px 22px;
+        text-align: left;
+    }
+
+    /* Brand name purely in CSS – no image dependency */
+    .brand-name {
+        font-size: 46px;
+        font-weight: bold;
+        color: #ffffff;
+        letter-spacing: -1px;
+        line-height: 1;
+    }
+
+    .brand-i {
+        display: inline-block;
+        position: relative;
+    }
+
+    .brand-dot {
+        color: #2fb135;
+        font-size: 10px;
+        position: absolute;
+        top: 4px;
+        left: 6px;
+    }
+
+    .address-row {
+        font-size: 8.5px;
+        color: #555;
+        font-weight: bold;
+        text-align: right;
+        padding: 3px 18px 5px 18px;
+        border-bottom: 1px solid #cccccc;
+    }
+
+    /* ─────────────────────────────────────────
+       FOOTER  –  position: fixed
+    ───────────────────────────────────────── */
+    #page-footer {
+        position: fixed;
+        bottom: -55px;        /* pull into the bottom margin */
+        left: -50px;
+        right: -50px;
+        height: 45px;
+        background-color: #3c415e;
+        text-align: center;
+        padding-top: 14px;
+    }
+
+    .footer-text {
+        color: #ffffff;
+        font-size: 11px;
+        font-weight: bold;
+        letter-spacing: 8px;
+    }
+
+    /* ─────────────────────────────────────────
+       GREY TITLE BAR
+    ───────────────────────────────────────── */
+    .title-bar {
+        background-color: #9499a6;
+        color: #ffffff;
+        text-align: center;
+        padding: 7px 0;
+        font-size: 13px;
+        font-weight: bold;
+        letter-spacing: 3px;
+        /* Stretch to touch both page margins */
+        margin-left: -50px;
+        margin-right: -50px;
+        margin-bottom: 24px;
+        margin-top: 0;
+    }
+
+    /* ─────────────────────────────────────────
+       BODY CONTENT
+    ───────────────────────────────────────── */
+    .candidate-block {
+        margin-bottom: 14px;
+        line-height: 1.6;
+    }
+
+    p {
+        margin: 0 0 10px 0;
+    }
+
+    .details-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 6px 0 14px 0;
+    }
+
+    .details-table td {
+        padding: 2px 0;
+        vertical-align: top;
+    }
+
+    .details-table td:first-child {
+        width: 130px;
+        font-weight: bold;
+    }
+
+    .resp-label {
+        font-weight: bold;
+        margin-bottom: 4px;
+    }
+
+    .resp-list {
+        margin: 0 0 4px 20px;
+        padding: 0;
+        list-style-type: disc;
+    }
+
+    .resp-list > li {
+        margin-bottom: 3px;
+    }
+
+    .sub-list {
+        margin: 2px 0 4px 20px;
+        padding: 0;
+        list-style-type: circle;
+    }
+
+    .sub-list > li {
+        margin-bottom: 2px;
+    }
+
+    .signature-area {
+        margin-top: 28px;
+        line-height: 1.7;
+    }
+
+</style>
+</head>
+
+<body>
+
+<!-- ═══════════ FIXED HEADER (auto-repeats every page) ═══════════ -->
+<div id="page-header">
+    <table class="header-table" cellpadding="0" cellspacing="0">
+        <tr>
+            <td class="header-logo-cell">
+                {% if offer.company_logo %}
+                    <img src="{{ offer.company_logo.path }}" style="max-height: 50px; max-width: 110px;">
+                {% else %}
+                    <img src="{{ MEDIA_ROOT }}/company_logos/robotic_logo.png" style="max-height: 50px; max-width: 110px;">
+                {% endif %}
+            </td>
+            <td class="header-brand-cell">
+                <span class="brand-name">intvice</span>
+            </td>
+        </tr>
+    </table>
+    <div class="address-row">{{ offer.company_address|upper }}</div>
+</div>
+
+<!-- ═══════════ FIXED FOOTER (auto-repeats every page) ═══════════ -->
+<div id="page-footer">
+    <span class="footer-text">I &nbsp; N &nbsp; T &nbsp; V &nbsp; I &nbsp; C &nbsp; E</span>
+</div>
+
+<!-- ═══════════ GREY TITLE BAR ═══════════ -->
+<div class="title-bar">APPRECIATION LETTER</div>
+
+<!-- ═══════════ MAIN CONTENT ═══════════ -->
+
+<!-- Candidate Address Block -->
+<div class="candidate-block">
+    <strong>{{ offer.candidate_name }}</strong><br>
+    {{ offer.candidate_address|linebreaksbr }}
+</div>
+
+<!-- Salutation -->
+<p>Dear <strong>{{ offer.candidate_name }}</strong>,</p>
+
+<!-- Opening Paragraph -->
+<p>We are delighted to acknowledge and appreciate the tremendous work you have accomplished as a <strong>{{ offer.job_title }}</strong> at <strong>{{ offer.company_name }}</strong>. Your skills and experience align well with our company's goals, and we believe you will make a valuable contribution to our team.</p>
+
+<!-- Job Details Table -->
+<table class="details-table">
+    <tr>
+        <td><strong>Job Title:</strong></td>
+        <td>{{ offer.job_title }}</td>
+    </tr>
+    <tr>
+        <td><strong>Location:</strong></td>
+        <td>{{ offer.job_location }}</td>
+    </tr>
+    <tr>
+        <td><strong>Date of Joining:</strong></td>
+        <td>{{ offer.joining_date|date:"F j, Y" }}</td>
+    </tr>
+</table>
+
+<!-- Responsibilities -->
+<div class="resp-label">Responsibilities:</div>
+{% if offer.responsibilities %}
+    {{ offer.responsibilities|safe }}
+{% else %}
+    <ul class="resp-list">
+        <li>Technical Support:
+            <ul class="sub-list">
+                <li>Provide technical assistance to both internal teams and external clients as needed.</li>
+                <li>Troubleshoot and resolve hardware and software issues efficiently.</li>
+            </ul>
+        </li>
+        <li>Project Collaboration:
+            <ul class="sub-list">
+                <li>Collaborate with cross-functional teams to contribute to the successful completion of engineering projects.</li>
+                <li>Communicate effectively with team members to ensure project goals are met within the specified timelines.</li>
+            </ul>
+        </li>
+        <li>Product Development:
+            <ul class="sub-list">
+                <li>Assist in the design, development, and testing of new products or enhancements to existing ones.</li>
+                <li>Contribute innovative ideas to improve product features and functionalities.</li>
+            </ul>
+        </li>
+        <li>Documentation:
+            <ul class="sub-list">
+                <li>Maintain accurate and up-to-date documentation for all engineering processes and project work.</li>
+                <li>Create and update technical documentation, including manuals and specifications.</li>
+            </ul>
+        </li>
+        <li>Quality Assurance:
+            <ul class="sub-list">
+                <li>Participate in quality assurance processes to ensure that products meet established standards and customer requirements.</li>
+                <li>Conduct thorough testing and analysis to identify and resolve potential issues.</li>
+            </ul>
+        </li>
+        <li>Continuous Learning:
+            <ul class="sub-list">
+                <li>Stay updated on industry trends, technologies, and best practices.</li>
+                <li>Participate in ongoing professional development activities to enhance skills and knowledge.</li>
+            </ul>
+        </li>
+        <li>Collaborative Problem Solving:
+            <ul class="sub-list">
+                <li>Work closely with team members to identify and address technical challenges.</li>
+                <li>Contribute to brainstorming sessions and offer solutions for complex engineering problems.</li>
+            </ul>
+        </li>
+    </ul>
+{% endif %}
+
+<!-- Appreciation Paragraph -->
+<p style="margin-top: 14px;">We would like to extend our sincere appreciation for your outstanding work as a <strong>{{ offer.job_title }}</strong> at <strong>{{ offer.company_name }}</strong>. Your expertise and dedication have directly contributed to the generation of significant revenue greater than 1 lakh for the company. Through your innovative web development solutions and tireless efforts, you have played a key role in helping us achieve critical business goals and revenue milestones.</p>
+
+<!-- Signature -->
+<div class="signature-area">
+    Sincerely,<br>
+    <strong>{{ offer.hr_name }}</strong><br>
+    {{ offer.hr_designation }}<br>
+    {{ offer.company_email }}
+</div>
+
+</body>
+</html>

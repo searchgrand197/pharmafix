@@ -1,0 +1,787 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document Upload - {{ candidate_name }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #64748b;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --light-bg: #f8fafc;
+            --border-color: #e2e8f0;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 2rem 0;
+        }
+
+        .upload-container {
+            max-width: 800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+            overflow: hidden;
+        }
+
+        .header-section {
+            background: linear-gradient(135deg, var(--primary-color), #1e40af);
+            color: white;
+            padding: 2rem;
+            text-align: center;
+        }
+
+        .header-section h1 {
+            margin: 0;
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .header-section p {
+            margin: 0.5rem 0 0 0;
+            opacity: 0.9;
+        }
+
+        .content-section {
+            padding: 2rem;
+        }
+
+        .document-card {
+            border: 2px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            transition: all 0.3s ease;
+            background: white;
+        }
+
+        .document-card:hover {
+            border-color: var(--primary-color);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .document-card.uploaded {
+            border-color: var(--success-color);
+            background: #f0fdf4;
+        }
+
+        .document-card.uploading {
+            border-color: var(--warning-color);
+            background: #fffbeb;
+        }
+
+        .document-card.physical {
+            border-color: #c4b5fd;
+            background: #f5f3ff;
+        }
+
+        .physical-notice {
+            padding: 1rem;
+            background: #ede9fe;
+            border-radius: 8px;
+            color: #5b21b6;
+            font-size: 0.875rem;
+        }
+
+        .info-banner {
+            background: #f5f3ff;
+            border: 1px solid #c4b5fd;
+            border-radius: 12px;
+            padding: 1rem 1.25rem;
+            margin-bottom: 1.5rem;
+            color: #5b21b6;
+            font-size: 0.9rem;
+        }
+
+        .document-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .document-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .document-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-pending {
+            background: #f1f5f9;
+            color: var(--secondary-color);
+        }
+
+        .status-uploading {
+            background: #fef3c7;
+            color: var(--warning-color);
+        }
+
+        .status-uploaded {
+            background: #dcfce7;
+            color: var(--success-color);
+        }
+
+        .status-error {
+            background: #fee2e2;
+            color: var(--danger-color);
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 2rem;
+            text-align: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            background: #fafafa;
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary-color);
+            background: #f0f9ff;
+        }
+
+        .upload-area.dragover {
+            border-color: var(--primary-color);
+            background: #dbeafe;
+        }
+
+        .upload-area i {
+            font-size: 3rem;
+            color: var(--secondary-color);
+            margin-bottom: 1rem;
+        }
+
+        .file-input {
+            display: none;
+        }
+
+        .upload-button {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .upload-button:hover {
+            background: #1d4ed8;
+        }
+
+        .file-preview {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .file-icon {
+            width: 40px;
+            height: 40px;
+            background: var(--primary-color);
+            color: white;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: var(--border-color);
+            border-radius: 2px;
+            overflow: hidden;
+            margin-top: 1rem;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: var(--primary-color);
+            transition: width 0.3s ease;
+        }
+
+        .action-buttons {
+            display: flex;
+            gap: 0.5rem;
+            margin-top: 1rem;
+        }
+
+        .btn-replace {
+            background: var(--warning-color);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .btn-replace:hover {
+            background: #d97706;
+        }
+
+        .btn-remove {
+            background: var(--danger-color);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            cursor: pointer;
+            transition: background 0.3s ease;
+        }
+
+        .btn-remove:hover {
+            background: #dc2626;
+        }
+
+        .submit-section {
+            text-align: center;
+            padding: 2rem;
+            border-top: 1px solid var(--border-color);
+            background: #f8fafc;
+        }
+
+        .btn-submit {
+            background: var(--success-color);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: 8px;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-submit:hover:not(:disabled) {
+            background: #059669;
+            transform: translateY(-2px);
+        }
+
+        .btn-submit:disabled {
+            background: var(--secondary-color);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .error-message {
+            color: var(--danger-color);
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+        }
+
+        .success-message {
+            color: var(--success-color);
+            font-size: 0.875rem;
+            margin-top: 0.5rem;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid var(--primary-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .fade-in {
+            animation: fadeIn 0.5s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @media (max-width: 768px) {
+            .upload-container {
+                margin: 1rem;
+                border-radius: 12px;
+            }
+            
+            .header-section {
+                padding: 1.5rem;
+            }
+            
+            .content-section {
+                padding: 1.5rem;
+            }
+            
+            .document-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 0.5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="upload-container">
+        <!-- Header Section -->
+        <div class="header-section">
+            <h1>Welcome, {{ candidate_name }}!</h1>
+            <p>{{ job_title }} - Complete your onboarding by uploading required documents</p>
+        </div>
+
+        <!-- Content Section -->
+        <div class="content-section">
+            {% if has_physical_documents %}
+            <div class="info-banner">
+                <strong>In-person verification required.</strong>
+                Some documents on this checklist must be verified in person at HR and do not require an online upload.
+            </div>
+            {% endif %}
+            <form id="uploadForm">
+                {% csrf_token %}
+                <input type="hidden" name="token" value="{{ token }}">
+                
+                <!-- Document Upload Cards -->
+                {% for doc in required_documents %}
+                <div class="document-card{% if not doc.requires_upload %} physical{% endif %}" id="card-{{ doc.slug }}" data-document-type="{{ doc.type }}" data-requires-upload="{{ doc.requires_upload|yesno:'true,false' }}">
+                    <div class="document-header">
+                        <div class="document-title">
+                            <i class="fas {% if doc.requires_upload %}fa-file-alt{% else %}fa-map-marker-alt{% endif %}"></i>
+                            {{ doc.label }}
+                            {% if doc.required %}
+                                <span class="text-danger">*</span>
+                            {% endif %}
+                        </div>
+                        <div class="document-status status-pending" id="status-{{ doc.slug }}">
+                            {% if doc.requires_upload %}Pending{% else %}Bring to HR office{% endif %}
+                        </div>
+                    </div>
+                    
+                    {% if doc.requires_upload %}
+                    <div class="upload-area" id="upload-area-{{ doc.slug }}" onclick="document.getElementById('file-{{ doc.slug }}').click()">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                        <p class="mb-2">Click to upload or drag and drop</p>
+                        <p class="text-muted small">PDF, JPG, PNG (Max 5MB)</p>
+                        <input type="file" 
+                               id="file-{{ doc.slug }}" 
+                               class="file-input" 
+                               accept=".pdf,.jpg,.jpeg,.png"
+                               onchange="handleFileSelect('{{ doc.slug }}', this.files[0])">
+                    </div>
+                    
+                    <div id="file-preview-{{ doc.slug }}" style="display: none;">
+                        <!-- File preview will be inserted here -->
+                    </div>
+                    {% else %}
+                    <div class="physical-notice">
+                        <i class="fas fa-info-circle"></i>
+                        Physical verification — bring this document to HR. No online upload is required.
+                    </div>
+                    {% endif %}
+                    
+                    <div id="error-{{ doc.slug }}" class="error-message"></div>
+                    <div id="success-{{ doc.slug }}" class="success-message"></div>
+                </div>
+                {% endfor %}
+            </form>
+        </div>
+
+        <!-- Submit Section -->
+        <div class="submit-section">
+            <button type="button" 
+                    id="submitBtn" 
+                    class="btn-submit" 
+                    onclick="completeOnboarding()"
+                    disabled>
+                <span id="submitText">Complete Onboarding</span>
+                <span id="submitLoader" class="loading-spinner" style="display: none;"></span>
+            </button>
+            <p class="text-muted mt-2 small">Please upload all required documents to continue</p>
+        </div>
+    </div>
+
+    <script>
+        const token = "{{ token }}";
+        const REQUIRED_SLUGS = {{ required_document_slugs_json|default:'[]'|safe }};
+        const uploadedDocuments = new Set();
+        const documentStatus = {};
+
+        /** Match Django `slugify(document_type)` so API rows map to card ids. */
+        function apiDocumentTypeToCardSlug(apiType) {
+            if (!apiType) return 'doc';
+            let s = String(apiType).trim().toLowerCase();
+            s = s.replace(/[^a-z0-9\s-]/g, '');
+            s = s.replace(/[\s_]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+            return s || 'doc';
+        }
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            loadExistingDocuments();
+            setupDragAndDrop();
+        });
+
+        // Load existing documents
+        async function loadExistingDocuments() {
+            try {
+                const response = await fetch(`/api/onboarding/get-documents/${token}/`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    data.documents.forEach(doc => {
+                        if (!doc.file_name) return;
+                        const slug = apiDocumentTypeToCardSlug(doc.document_type);
+                        const card = document.getElementById('card-' + slug);
+                        if (!card) return;
+                        updateDocumentStatus(slug, 'uploaded', doc.file_name);
+                        uploadedDocuments.add(slug);
+                        const preview = document.getElementById('file-preview-' + slug);
+                        const uploadArea = document.getElementById('upload-area-' + slug);
+                        if (preview && uploadArea) {
+                            preview.innerHTML = '<div class="text-muted small">Previously uploaded: <strong>' + escapeHtml(doc.file_name) + '</strong></div>';
+                            preview.style.display = 'block';
+                            uploadArea.style.display = 'none';
+                        }
+                    });
+                    updateSubmitButton();
+                }
+            } catch (error) {
+                console.error('Error loading documents:', error);
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Setup drag and drop
+        function setupDragAndDrop() {
+            const uploadAreas = document.querySelectorAll('.upload-area');
+            
+            uploadAreas.forEach(area => {
+                const slug = area.id.replace('upload-area-', '');
+                
+                area.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    area.classList.add('dragover');
+                });
+                
+                area.addEventListener('dragleave', (e) => {
+                    e.preventDefault();
+                    area.classList.remove('dragover');
+                });
+                
+                area.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    area.classList.remove('dragover');
+                    
+                    const files = e.dataTransfer.files;
+                    if (files.length > 0) {
+                        handleFileSelect(slug, files[0]);
+                    }
+                });
+            });
+        }
+
+        function documentTypeForSlug(slug) {
+            const card = document.getElementById('card-' + slug);
+            return card ? card.getAttribute('data-document-type') : slug;
+        }
+
+        // Handle file selection (slug = DOM id suffix; API gets data-document-type)
+        async function handleFileSelect(slug, file) {
+            if (!file) return;
+            const documentType = documentTypeForSlug(slug);
+            
+            // Validate file
+            const validation = validateFile(file);
+            if (!validation.valid) {
+                updateDocumentStatus(slug, 'error', validation.error);
+                return;
+            }
+            
+            // Show uploading state
+            updateDocumentStatus(slug, 'uploading', 'Uploading...');
+            showFilePreview(slug, file);
+            
+            // Upload file
+            try {
+                const formData = new FormData();
+                formData.append('token', token);
+                formData.append('document_type', documentType);
+                formData.append('file', file);
+                
+                const response = await fetch('/api/onboarding/upload-document/', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    updateDocumentStatus(slug, 'uploaded', file.name);
+                    uploadedDocuments.add(slug);
+                    showSuccessMessage(slug, 'Document uploaded successfully');
+                } else {
+                    updateDocumentStatus(slug, 'error', result.error);
+                    showErrorMessage(slug, result.error);
+                }
+            } catch (error) {
+                updateDocumentStatus(slug, 'error', 'Upload failed. Please try again.');
+                showErrorMessage(slug, 'Upload failed. Please try again.');
+            }
+            
+            updateSubmitButton();
+        }
+
+        // Validate file
+        function validateFile(file) {
+            const allowedTypes = ['application/pdf', 'image/jpeg', 'image/jpg', 'image/png'];
+            const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png'];
+            const maxSize = 5 * 1024 * 1024; // 5MB
+            
+            // Check file extension first (Windows often sends empty MIME type)
+            const extension = '.' + (file.name.split('.').pop() || '').toLowerCase();
+            if (!allowedExtensions.includes(extension)) {
+                return { valid: false, error: 'Invalid file extension. Please upload PDF, JPG, or PNG.' };
+            }
+
+            if (file.type && !allowedTypes.includes(file.type)) {
+                return { valid: false, error: 'Invalid file type. Please upload PDF, JPG, or PNG.' };
+            }
+            
+            // Check file size
+            if (file.size > maxSize) {
+                return { valid: false, error: 'File size exceeds 5MB limit.' };
+            }
+            
+            return { valid: true };
+        }
+
+        // Update document status (slug = DOM id suffix)
+        function updateDocumentStatus(slug, status, message = '') {
+            const card = document.getElementById(`card-${slug}`);
+            const statusElement = document.getElementById(`status-${slug}`);
+            if (!card || !statusElement) return;
+            
+            // Remove all status classes
+            card.classList.remove('uploaded', 'uploading', 'error');
+            statusElement.classList.remove('status-pending', 'status-uploading', 'status-uploaded', 'status-error');
+            
+            // Add new status classes
+            switch (status) {
+                case 'uploading':
+                    card.classList.add('uploading');
+                    statusElement.classList.add('status-uploading');
+                    statusElement.innerHTML = '<div class="loading-spinner"></div> Uploading';
+                    break;
+                case 'uploaded':
+                    card.classList.add('uploaded');
+                    statusElement.classList.add('status-uploaded');
+                    statusElement.innerHTML = '<i class="fas fa-check"></i> Uploaded';
+                    break;
+                case 'error':
+                    card.classList.add('error');
+                    statusElement.classList.add('status-error');
+                    statusElement.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Error';
+                    break;
+                default:
+                    statusElement.classList.add('status-pending');
+                    statusElement.textContent = 'Pending';
+            }
+            
+            documentStatus[slug] = status;
+        }
+
+        // Show file preview
+        function showFilePreview(slug, file) {
+            const previewContainer = document.getElementById(`file-preview-${slug}`);
+            const uploadArea = document.getElementById(`upload-area-${slug}`);
+            
+            const fileIcon = getFileIcon(file.type);
+            const fileSize = formatFileSize(file.size);
+            
+            previewContainer.innerHTML = `
+                <div class="file-preview">
+                    <div class="file-info">
+                        <div class="file-icon">
+                            <i class="${fileIcon}"></i>
+                        </div>
+                        <div>
+                            <div class="fw-semibold">${file.name}</div>
+                            <div class="text-muted small">${fileSize}</div>
+                        </div>
+                    </div>
+                    <div class="action-buttons">
+                        <button type="button" class="btn-replace" onclick="document.getElementById('file-${slug}').click()">
+                            <i class="fas fa-sync"></i> Replace
+                        </button>
+                        <button type="button" class="btn-remove" onclick="removeDocument('${slug}')">
+                            <i class="fas fa-trash"></i> Remove
+                        </button>
+                    </div>
+                </div>
+            `;
+            
+            previewContainer.style.display = 'block';
+            uploadArea.style.display = 'none';
+        }
+
+        // Get file icon based on type
+        function getFileIcon(fileType) {
+            if (fileType === 'application/pdf') {
+                return 'fas fa-file-pdf';
+            } else if (fileType.includes('image')) {
+                return 'fas fa-file-image';
+            }
+            return 'fas fa-file';
+        }
+
+        // Format file size
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        // Remove document
+        function removeDocument(slug) {
+            const previewContainer = document.getElementById(`file-preview-${slug}`);
+            const uploadArea = document.getElementById(`upload-area-${slug}`);
+            const fileInput = document.getElementById(`file-${slug}`);
+            
+            previewContainer.style.display = 'none';
+            uploadArea.style.display = 'block';
+            fileInput.value = '';
+            
+            updateDocumentStatus(slug, 'pending');
+            uploadedDocuments.delete(slug);
+            updateSubmitButton();
+            
+            clearMessages(slug);
+        }
+
+        // Show success message
+        function showSuccessMessage(slug, message) {
+            const successElement = document.getElementById(`success-${slug}`);
+            successElement.textContent = message;
+            successElement.style.display = 'block';
+            
+            setTimeout(() => {
+                successElement.style.display = 'none';
+            }, 5000);
+        }
+
+        // Show error message
+        function showErrorMessage(slug, message) {
+            const errorElement = document.getElementById(`error-${slug}`);
+            errorElement.textContent = message;
+            errorElement.style.display = 'block';
+        }
+
+        // Clear messages
+        function clearMessages(slug) {
+            document.getElementById(`error-${slug}`).style.display = 'none';
+            document.getElementById(`success-${slug}`).style.display = 'none';
+        }
+
+        // Update submit button
+        function updateSubmitButton() {
+            const submitBtn = document.getElementById('submitBtn');
+            const allUploaded = REQUIRED_SLUGS.length > 0 && REQUIRED_SLUGS.every(slug => uploadedDocuments.has(slug));
+            
+            submitBtn.disabled = !allUploaded;
+            
+            if (allUploaded) {
+                document.getElementById('submitText').textContent = 'Complete Onboarding';
+            } else {
+                const remaining = REQUIRED_SLUGS.filter(slug => !uploadedDocuments.has(slug)).length;
+                document.getElementById('submitText').textContent = `Upload ${remaining} more document${remaining > 1 ? 's' : ''}`;
+            }
+        }
+
+        // Complete onboarding
+        async function completeOnboarding() {
+            const submitBtn = document.getElementById('submitBtn');
+            const submitText = document.getElementById('submitText');
+            const submitLoader = document.getElementById('submitLoader');
+            
+            // Show loading state
+            submitBtn.disabled = true;
+            submitText.style.display = 'none';
+            submitLoader.style.display = 'inline-block';
+            
+            try {
+                const response = await fetch('/api/onboarding/complete/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        token: token
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Show success message
+                    alert('Onboarding completed successfully! Your documents have been submitted for review.');
+                    
+                    // Redirect to success page or show completion message
+                    window.location.href = '/onboarding/success/';
+                } else {
+                    alert('Error: ' + result.error);
+                    submitBtn.disabled = false;
+                    submitText.style.display = 'inline';
+                    submitLoader.style.display = 'none';
+                }
+            } catch (error) {
+                alert('Failed to complete onboarding. Please try again.');
+                submitBtn.disabled = false;
+                submitText.style.display = 'inline';
+                submitLoader.style.display = 'none';
+            }
+        }
+    </script>
+</body>
+</html>

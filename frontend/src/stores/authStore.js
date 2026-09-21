@@ -122,6 +122,12 @@ function normalizeUser(raw) {
       : Array.isArray(u?.allowed_pharmacy_ids)
         ? u.allowed_pharmacy_ids
         : [],
+    has_employee_profile: Boolean(raw?.has_employee_profile ?? u?.has_employee_profile),
+    employee_id: raw?.employee_id ?? u?.employee_id ?? null,
+    employee_status: raw?.employee_status ?? u?.employee_status ?? null,
+    employee_code: raw?.employee_code ?? u?.employee_code ?? null,
+    portal_access_allowed: raw?.portal_access_allowed ?? u?.portal_access_allowed,
+    must_change_password: Boolean(raw?.must_change_password ?? u?.must_change_password),
     ...(hospitalId != null && hospitalId !== ''
       ? { hospital_id: String(hospitalId), hospital_name: hospitalName ?? null }
       : {}),
@@ -334,6 +340,16 @@ export const useAuthStore = create(
       setUser: (user) => {
         set({ user });
         syncToLegacyKeys(get());
+      },
+
+      /** Persist active pharmacy branch for pharmacy/inventory API scoping */
+      setPharmacyBranch: (id, label = null) => {
+        const newState = {
+          pharmacyBranchId: id ? String(id) : null,
+          pharmacyBranchLabel: label ? String(label) : null,
+        };
+        set(newState);
+        syncToLegacyKeys({ ...get(), ...newState });
       },
 
       /** Check if user has a specific role */

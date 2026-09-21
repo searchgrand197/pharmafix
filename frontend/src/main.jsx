@@ -9,7 +9,17 @@ import App from './App'
 import InstallPrompt from './components/InstallPrompt'
 import './index.css'
 
-/** Production only — in dev, SW can intercept Vite `/src/...` module requests and break lazy-loaded portals. */
+/** Capture install prompt before React mounts (avoids race with InstallPrompt). */
+if (typeof window !== 'undefined') {
+  window.__hmsDeferredInstallPrompt = null
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault()
+    window.__hmsDeferredInstallPrompt = e
+    window.dispatchEvent(new Event('hms-install-ready'))
+  })
+}
+
+/** Register SW in production only — dev SW breaks Vite module loading. */
 if (import.meta.env.DEV && 'serviceWorker' in navigator) {
   navigator.serviceWorker.getRegistrations().then((regs) => regs.forEach((r) => r.unregister())).catch(() => {})
 }

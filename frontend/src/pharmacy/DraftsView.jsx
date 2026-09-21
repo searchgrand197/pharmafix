@@ -47,7 +47,7 @@ function DeleteConfirmModal({ draft, onCancel, onConfirm, deleting }) {
               <FileText size={12} className="text-slate-400 shrink-0" />
               <span className="text-[11px] font-mono text-slate-500">#{draft.invoice_no}</span>
               {draft.created_at && (
-                <span className="text-[10px] text-slate-400 ml-auto">{formatWithPattern(new Date(draft.created_at), 'dd MMM · HH:mm')}</span>
+                <span className="text-[10px] text-slate-400 ml-auto">{formatWithPattern(new Date(draft.created_at), 'dd/MM/yyyy · HH:mm')}</span>
               )}
             </div>
           </div>
@@ -102,7 +102,7 @@ function buildDraftPrintHtml(draft) {
   const patientName = draft.patient_details?.first_name
     ? `${draft.patient_details.first_name} ${draft.patient_details.last_name || ''}`.trim()
     : draft.patient_name || 'Walk-in Patient'
-  const createdAt = draft.created_at ? formatWithPattern(draft.created_at, 'dd MMM yyyy, HH:mm') : '—'
+  const createdAt = draft.created_at ? formatWithPattern(draft.created_at, 'dd/MM/yyyy, HH:mm') : '—'
   const { prescriptionLines, notesLines } = extractDraftTextParts(draft.remarks)
   const fallbackItems = Array.isArray(draft.items) ? draft.items : []
   const rxLines = prescriptionLines.length

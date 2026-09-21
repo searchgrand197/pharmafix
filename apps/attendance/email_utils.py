@@ -15,15 +15,26 @@ from __future__ import annotations
 import smtplib
 import ssl
 from email.message import EmailMessage
+from email.utils import format_datetime
+from zoneinfo import ZoneInfo
 
 from django.conf import settings
 from django.core import signing
+from django.utils import timezone
 
 
 # ── Token helpers ─────────────────────────────────────────────────────────────
 
 TOKEN_MAX_AGE = 7 * 24 * 3600  # 7 days in seconds
 _SALT = "hms.leave.action"
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _stamp_ist_headers(msg):
+    sent_at = timezone.now().astimezone(IST)
+    msg["Date"] = format_datetime(sent_at)
+    msg["X-Curevice-Local-Time"] = sent_at.strftime("%d %b %Y, %I:%M %p IST")
+    msg["X-Curevice-Time-Zone"] = "Asia/Kolkata"
 
 
 def make_leave_action_token(*, leave_id, approver_id, action: str) -> str:
@@ -211,6 +222,7 @@ def send_leave_approval_emails(application) -> int:
             msg["To"] = user.email
             msg.set_content(text_body)
             msg.add_alternative(html_body, subtype="html")
+            _stamp_ist_headers(msg)
 
             # This block is intentionally identical to staff creation email.
             if use_ssl:

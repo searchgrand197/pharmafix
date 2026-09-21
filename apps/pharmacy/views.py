@@ -1,7 +1,7 @@
 from django.db import IntegrityError, transaction
 from decimal import Decimal
 from django.utils import timezone
-from django.utils.dateparse import parse_date
+from django.utils.dateparse import parse_date, parse_datetime
 from django.db.models import BooleanField, Case, F, Prefetch, Q, Value, When
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import generics, permissions, serializers, status, viewsets
@@ -20,11 +20,14 @@ from apps.inventory.services.stock_service import (
 )
 from apps.shared.cancel_service import apply_void_if_last, is_last_pharmacy_invoice, release_pharmacy_invoice_number, void_pharmacy_sequence
 
+from apps.pharmacy.calculations import invoice_round_off
 from apps.pharmacy.invoice_number import next_pharmacy_invoice_number
 from apps.pharmacy.models import Pharmacy, PharmacyInvoice, PharmacyInvoiceItem, PharmacyOutletSettings, PharmacySupplier
-from apps.patients.models import PatientAddress, PatientGuardian
+from apps.patients.models import Patient, PatientAddress, PatientGuardian
+from apps.patients.age_utils import AGE_UNIT_YEARS, VALID_AGE_UNITS, age_parts_to_dob
 from apps.pharmacy.purchase_challan import process_purchase_challan
 from apps.pharmacy.purchase_history import detail_purchase_history, list_purchase_history
+from apps.pharmacy.services.return_summary_service import build_invoice_return_summary
 from apps.pharmacy.outlet_settings_channels import apply_nested_settings_patch, nested_settings_response
 from apps.pharmacy.serializers import (
     PharmacyInvoiceItemSerializer,
@@ -57,6 +60,27 @@ def _require_pharmacy_branch(request):
                 {"detail": ["Your account is not allowed to access this pharmacy branch."]}
             )
     return pharmacy
+
+
+def _parse_invoice_datetime(value, *, error_key="invoice_datetime"):
+    if value in (None, ""):
+        return None
+    invoice_dt = value
+    if isinstance(value, str):
+        invoice_dt = parse_datetime(value.strip())
+        if invoice_dt is None:
+            raise ValidationError({error_key: "Enter a valid invoice datetime."})
+    if timezone.is_naive(invoice_dt):
+        invoice_dt = timezone.make_aware(invoice_dt, timezone.get_current_timezone())
+    return invoice_dt
+
+
+def _sync_invoice_created_at(invoice, invoice_datetime):
+    if invoice_datetime is None:
+        return invoice
+    PharmacyInvoice.objects.filter(pk=invoice.pk).update(created_at=invoice_datetime)
+    invoice.refresh_from_db()
+    return invoice
 
 
 class PharmacyOutletSettingsView(generics.RetrieveUpdateAPIView):
@@ -163,13 +187,26 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
     serializer_class = PharmacyInvoiceSerializer
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [SearchFilter]
-    search_fields = ["invoice_no", "patient__first_name", "patient__last_name", "patient__uhid"]
+    search_fields = ["invoice_no", "patient__first_name", "patient__last_name", "patient__uhid", "patient__phone"]
 
     def get_queryset(self):
         pharmacy = _get_pharmacy_branch(self.request)
-        if pharmacy is None:
+        hospital = getattr(self.request.user, "hospital", None)
+        action = getattr(self, "action", None)
+        qs = super().get_queryset().filter(voided=False)
+        # Detail / print-copy / return-summary (reception TPA): hospital-scoped by id.
+        # Lists and edits stay tied to the selected pharmacy branch.
+        if action in ("retrieve", "save_print_copy", "return_summary"):
+            if hospital is not None:
+                qs = qs.filter(pharmacy__hospital_id=hospital.id)
+            elif pharmacy is not None:
+                qs = qs.filter(pharmacy=pharmacy)
+            else:
+                return PharmacyInvoice.objects.none()
+        elif pharmacy is None:
             return PharmacyInvoice.objects.none()
-        qs = super().get_queryset().filter(pharmacy=pharmacy, voided=False)
+        else:
+            qs = qs.filter(pharmacy=pharmacy)
         patient_id = self.request.query_params.get("patient")
         ipd_admission = self.request.query_params.get("ipd_admission")
         status_filter = (self.request.query_params.get("status") or "").strip().lower()
@@ -180,7 +217,7 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
         if status_filter:
             # Status stored as lowercase in DB (TextChoices value, not name)
             qs = qs.filter(status=status_filter)
-        if getattr(self, "action", None) == "list":
+        if action == "list":
             qs = qs.defer("print_html").annotate(
                 has_print_copy_flag=Case(
                     When(Q(print_html__gt=""), then=Value(True)),
@@ -204,7 +241,10 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
         requested_status = serializer.validated_data.get("status")
         if requested_status == PharmacyInvoice.Status.CANCELLED:
             raise ValidationError({"detail": "Use the cancel action to cancel a pharmacy receipt."})
-        serializer.save()
+        invoice = serializer.save()
+        invoice_datetime = getattr(serializer, "_invoice_datetime", None)
+        if invoice_datetime is not None:
+            _sync_invoice_created_at(invoice, invoice_datetime)
 
     def perform_create(self, serializer):
         pharmacy = _get_pharmacy_branch(self.request)
@@ -220,33 +260,49 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
                 invoice_no = next_pharmacy_invoice_number(pharmacy.id, reserve=True, channel=channel)
         payment_method = (serializer.validated_data.get("payment_method") or "cash").lower()
         grand_total = serializer.validated_data.get("grand_total") or Decimal("0.00")
+        round_off = serializer.validated_data.get("round_off") or Decimal("0.00")
+        if serializer.validated_data.get("party") is None:
+            # Retail bills settle in whole rupees. Re-derive from the exact amount the
+            # payload implies, so the rule holds no matter what the client rounded.
+            grand_total, round_off = invoice_round_off(grand_total - round_off)
+        else:
+            round_off = Decimal("0.00")
         paid_amount = serializer.validated_data.get("paid_amount")
         if payment_method == "credit":
             paid_amount = Decimal("0.00")
-        elif paid_amount is None:
+        elif paid_amount is None or abs(grand_total - paid_amount) < Decimal("1.00"):
+            # Full settlement: absorb the round-off rather than leaving paise of due.
             paid_amount = grand_total
         for _ in range(3):
             try:
-                serializer.save(
+                invoice = serializer.save(
                     pharmacy=pharmacy,
                     created_by=self.request.user,
                     invoice_no=invoice_no,
                     payment_method=payment_method,
+                    grand_total=grand_total,
+                    round_off=round_off,
                     paid_amount=paid_amount,
                 )
+                invoice_datetime = getattr(serializer, "_invoice_datetime", None)
+                if invoice_datetime is not None:
+                    _sync_invoice_created_at(invoice, invoice_datetime)
                 return
             except IntegrityError:
                 invoice_no = next_pharmacy_invoice_number(pharmacy.id, reserve=True, channel=channel)
                 while PharmacyInvoice.objects.filter(invoice_no=invoice_no).exists():
                     invoice_no = next_pharmacy_invoice_number(pharmacy.id, reserve=True, channel=channel)
         # If all retries fail, bubble up the final DB integrity error.
-        serializer.save(
+        invoice = serializer.save(
             pharmacy=pharmacy,
             created_by=self.request.user,
             invoice_no=invoice_no,
             payment_method=payment_method,
             paid_amount=paid_amount,
         )
+        invoice_datetime = getattr(serializer, "_invoice_datetime", None)
+        if invoice_datetime is not None:
+            _sync_invoice_created_at(invoice, invoice_datetime)
 
     @action(detail=True, methods=["post"], url_path="cancel")
     @transaction.atomic
@@ -325,8 +381,39 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
             return Response({"detail": "Invoice has no patient linked."}, status=status.HTTP_400_BAD_REQUEST)
 
         patient_payload = request.data.get("patient") or {}
+        requested_id = str(patient_payload.get("id") or "").strip()
+        if requested_id and str(requested_id) != str(patient.id):
+            found = Patient.objects.filter(pk=requested_id, is_deleted=False).first()
+            if not found:
+                return Response(
+                    {"detail": "Selected patient was not found."},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+            invoice.patient = found
+            invoice.save(update_fields=["patient", "updated_at"])
+            patient = found
         invoice_payload = request.data.get("invoice") or {}
         items_payload = request.data.get("items") or []
+        invoice_datetime = _parse_invoice_datetime(invoice_payload.get("invoice_datetime"))
+        should_update_invoice_date = False
+        resolved_invoice_date = invoice.date
+        if "date" in invoice_payload:
+            raw_invoice_date = str(invoice_payload.get("date") or "").strip()
+            if not raw_invoice_date:
+                raise ValidationError({"invoice.date": ["Invoice date is required."]})
+            parsed_invoice_date = parse_date(raw_invoice_date)
+            if parsed_invoice_date is None:
+                raise ValidationError({"invoice.date": ["Enter a valid invoice date."]})
+            resolved_invoice_date = parsed_invoice_date
+            should_update_invoice_date = True
+        if invoice_datetime is not None:
+            local_invoice_date = timezone.localtime(invoice_datetime).date()
+            if should_update_invoice_date and resolved_invoice_date != local_invoice_date:
+                raise ValidationError(
+                    {"invoice_datetime": ["Invoice date must match the date portion of invoice datetime."]}
+                )
+            resolved_invoice_date = local_invoice_date
+            should_update_invoice_date = True
 
         if not isinstance(items_payload, list) or len(items_payload) == 0:
             return Response({"detail": "At least one item is required."}, status=status.HTTP_400_BAD_REQUEST)
@@ -341,7 +428,20 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
         gender = str(patient_payload.get("gender", patient.gender or "")).strip().lower()
         if gender in ("male", "female", "other"):
             patient.gender = gender
-        patient.save(update_fields=["first_name", "last_name", "phone", "gender", "updated_at"])
+        patient_update_fields = ["first_name", "last_name", "phone", "gender", "updated_at"]
+        age_raw = patient_payload.get("age", None)
+        if age_raw not in (None, ""):
+            age_unit = str(patient_payload.get("age_unit") or AGE_UNIT_YEARS).strip().lower()
+            if age_unit not in VALID_AGE_UNITS:
+                age_unit = AGE_UNIT_YEARS
+            try:
+                dob = age_parts_to_dob(int(age_raw), age_unit)
+            except (TypeError, ValueError):
+                dob = None
+            if dob is not None:
+                patient.dob = dob
+                patient_update_fields.append("dob")
+        patient.save(update_fields=patient_update_fields)
 
         # Update guardian
         guardian_name = str(patient_payload.get("guardian_name", "")).strip()
@@ -417,9 +517,17 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
         grand_total = (subtotal + total_cgst + total_sgst - total_discount).quantize(Decimal("0.01"))
         if grand_total < 0:
             grand_total = Decimal("0.00")
+        # Retail bills settle in whole rupees; party (B2B / GST) bills stay exact.
+        round_off = Decimal("0.00")
+        if invoice.party_id is None:
+            grand_total, round_off = invoice_round_off(grand_total)
         paid_amount = Decimal(str(invoice_payload.get("paid_amount", invoice.paid_amount or 0) or 0)).quantize(Decimal("0.01"))
         if payment_method == "credit":
             paid_amount = Decimal("0.00")
+        elif abs(grand_total - paid_amount) < Decimal("1.00"):
+            # This endpoint only settles in full or as credit, so absorb the round-off
+            # instead of leaving a few paise of due behind.
+            paid_amount = grand_total
         if paid_amount > grand_total:
             paid_amount = grand_total
         if paid_amount < 0:
@@ -427,31 +535,51 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
 
         invoice.payment_method = payment_method
         invoice.paid_amount = paid_amount
+        if should_update_invoice_date:
+            invoice.date = resolved_invoice_date
         invoice.total_discount = total_discount
         invoice.subtotal = subtotal.quantize(Decimal("0.01"))
         invoice.cgst = total_cgst.quantize(Decimal("0.01"))
         invoice.sgst = total_sgst.quantize(Decimal("0.01"))
+        invoice.round_off = round_off
         invoice.grand_total = grand_total
         invoice.remarks = str(invoice_payload.get("remarks", invoice.remarks or ""))
+        if "billing_doctor_name" in invoice_payload:
+            invoice.billing_doctor_name = str(invoice_payload.get("billing_doctor_name") or "").strip()
+        if "billing_hospital_name" in invoice_payload:
+            invoice.billing_hospital_name = str(invoice_payload.get("billing_hospital_name") or "").strip()
         invoice.print_html = ""
         invoice.print_html_updated_at = None
-        invoice.save(
-            update_fields=[
-                "payment_method",
-                "paid_amount",
-                "total_discount",
-                "subtotal",
-                "cgst",
-                "sgst",
-                "grand_total",
-                "remarks",
-                "print_html",
-                "print_html_updated_at",
-                "updated_at",
-            ]
-        )
+        update_fields = [
+            "payment_method",
+            "paid_amount",
+            "total_discount",
+            "subtotal",
+            "cgst",
+            "sgst",
+            "round_off",
+            "grand_total",
+            "remarks",
+            "print_html",
+            "print_html_updated_at",
+            "updated_at",
+        ]
+        if should_update_invoice_date:
+            update_fields.append("date")
+        if "billing_doctor_name" in invoice_payload:
+            update_fields.append("billing_doctor_name")
+        if "billing_hospital_name" in invoice_payload:
+            update_fields.append("billing_hospital_name")
+        invoice.save(update_fields=update_fields)
+        if invoice_datetime is not None:
+            _sync_invoice_created_at(invoice, invoice_datetime)
         return success_response(data=PharmacyInvoiceSerializer(invoice).data, message="Invoice updated.")
 
+    @action(detail=True, methods=["get"], url_path="return-summary")
+    def return_summary(self, request, pk=None):
+        invoice = self.get_object()
+        data = build_invoice_return_summary(invoice)
+        return success_response(data)
 
     @action(detail=False, methods=["post"], url_path="create-draft")
     def create_draft(self, request, *args, **kwargs):
@@ -591,6 +719,42 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
             message="Print copy saved." if invoice.print_html else "Print copy cleared.",
         )
 
+    @action(detail=True, methods=["post"], url_path="clear-credit")
+    def clear_credit(self, request, pk=None, *args, **kwargs):
+        """
+        POST /api/v1/pharmacy/invoices/{id}/clear-credit/
+        Mark a pending credit invoice as fully paid without editing line items.
+        """
+        invoice = self.get_object()
+        if invoice.status == PharmacyInvoice.Status.CANCELLED:
+            return Response(
+                {"detail": "Cancelled pharmacy receipts cannot be settled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if invoice.status != PharmacyInvoice.Status.FINALIZED:
+            return Response(
+                {"detail": "Only finalized invoices can be settled."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        due = (invoice.grand_total or Decimal("0.00")) - (invoice.paid_amount or Decimal("0.00"))
+        if due <= 0:
+            return Response(
+                {"detail": "No pending due on this invoice."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        payment_method = str(request.data.get("payment_method") or "cash").strip().lower()
+        if payment_method not in ("cash", "card", "upi", "bank_transfer", "other"):
+            payment_method = "cash"
+
+        invoice.payment_method = payment_method
+        invoice.paid_amount = invoice.grand_total or Decimal("0.00")
+        invoice.save(update_fields=["payment_method", "paid_amount", "updated_at"])
+        return success_response(
+            data=PharmacyInvoiceSerializer(invoice, context=self.get_serializer_context()).data,
+            message="Pending credit cleared.",
+        )
+
     @action(detail=False, methods=["get"], url_path="pending-credits")
     def pending_credits(self, request, *args, **kwargs):
         qs = (
@@ -630,6 +794,7 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
                     "uhid": inv.patient.uhid or "",
                     "phone": inv.patient.phone or "",
                     "total_pending_amount": Decimal("0.00"),
+                    "latest_bill_at": inv.created_at,
                     "bills": [],
                 }
                 patients[pid] = row
@@ -639,6 +804,7 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
                     "id": str(inv.id),
                     "invoice_no": inv.invoice_no,
                     "date": inv.date.isoformat() if inv.date else None,
+                    "created_at": inv.created_at.isoformat() if inv.created_at else None,
                     "grand_total": str(inv.grand_total or Decimal("0.00")),
                     "paid_amount": str(inv.paid_amount or Decimal("0.00")),
                     "due_amount": str(due),
@@ -652,8 +818,10 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
         for row in patients.values():
             row["total_pending_amount"] = str(row["total_pending_amount"])
             row["bill_count"] = len(row["bills"])
+            latest = row.pop("latest_bill_at", None)
+            row["latest_bill_at"] = latest.isoformat() if latest else None
             rows.append(row)
-        rows.sort(key=lambda r: Decimal(r["total_pending_amount"]), reverse=True)
+        rows.sort(key=lambda r: r.get("latest_bill_at") or "", reverse=True)
         return success_response(
             rows,
             meta={

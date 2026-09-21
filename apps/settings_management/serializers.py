@@ -12,6 +12,7 @@ from apps.settings_management.opd_field_catalog import (
     OPD_CORE_FIELD_KEYS,
     normalize_opd_field_config,
 )
+from apps.settings_management.ipd_process_field_config import normalize_ipd_process_field_config, normalize_ipd_process_templates
 
 OPD_FORM_VISIBLE_FIELD_KEYS = frozenset(OPD_CORE_FIELD_KEYS)
 
@@ -52,6 +53,7 @@ class ReceptionPortalSettingsSerializer(serializers.ModelSerializer):
     opd_fee_slots = serializers.ListField(required=False)
     opd_visible_fields = serializers.ListField(child=serializers.CharField(), required=False)
     opd_field_config = serializers.JSONField(required=False)
+    ipd_process_field_config = serializers.JSONField(required=False)
     current_opd_slot_fee = serializers.SerializerMethodField()
     current_opd_slot = serializers.SerializerMethodField()
     hospital_logo_url = serializers.SerializerMethodField()
@@ -80,6 +82,7 @@ class ReceptionPortalSettingsSerializer(serializers.ModelSerializer):
             "opd_fee_slots",
             "opd_visible_fields",
             "opd_field_config",
+            "ipd_process_field_config",
             "admission_bed_label_mode",
             "time_display_mode",
             "reception_collection_enabled",
@@ -178,6 +181,13 @@ class ReceptionPortalSettingsSerializer(serializers.ModelSerializer):
         if not isinstance(value, dict):
             raise serializers.ValidationError("Field config must be an object.")
         return normalize_opd_field_config(value)
+
+    def validate_ipd_process_field_config(self, value):
+        if value in (None, ""):
+            return normalize_ipd_process_templates({})
+        if not isinstance(value, dict):
+            raise serializers.ValidationError("IPD process field config must be an object.")
+        return normalize_ipd_process_templates(value)
 
     def validate_opd_fee_slots(self, value):
         if value in (None, ""):

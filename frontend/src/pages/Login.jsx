@@ -13,9 +13,19 @@ import {
   CheckCircle as CheckCircleIcon,
   Autorenew as AutorenewIcon,
   Shield as ShieldIcon,
+  Groups as GroupsIcon,
+  Badge as BadgeIcon,
 } from '@mui/icons-material'
 import { useAuthStore } from '../stores/authStore'
 import { AccountRestrictedError } from '../utils/authErrors'
+import { getApiErrorMessage } from '../utils/apiError'
+import {
+  defaultPathForRole,
+  employeePortalPath,
+  getStoredUser,
+  hasAccessToken,
+  isEmployeeOnlyAccount,
+} from '../utils/auth'
 
 function asMuiIcon(IconComponent) {
   return function IconBridge({ size, className, sx, ...rest }) {
@@ -33,6 +43,8 @@ const Store = asMuiIcon(StoreIcon)
 const CheckCircle2 = asMuiIcon(CheckCircleIcon)
 const Loader2 = asMuiIcon(AutorenewIcon)
 const Shield = asMuiIcon(ShieldIcon)
+const Groups = asMuiIcon(GroupsIcon)
+const Badge = asMuiIcon(BadgeIcon)
 
 const ROLES = [
   { label: 'Staff',        value: 'staff',        path: '/staff',        icon: UserCog,       color: '#6366f1' },
@@ -41,6 +53,8 @@ const ROLES = [
   { label: 'Lab',          value: 'lab',          path: '/lab',          icon: FlaskConical,  color: '#06b6d4' },
   { label: 'Pharmacy',     value: 'pharmacy',     path: '/pharmacy',     icon: Store,         color: '#10b981' },
   { label: 'Admin',        value: 'admin',        path: '/admin',        icon: Shield,        color: '#dc2626' },
+  { label: 'HR',           value: 'hr',           path: '/hr/journey-center/dashboard', icon: Groups, color: '#ea580c' },
+  { label: 'Employee',     value: 'employee',     path: '/employee/dashboard', icon: Badge, color: '#0891b2' },
 ]
 
 const STYLE = `
@@ -95,8 +109,8 @@ const STYLE = `
   .fl { display:block; font-size:0.62rem; font-weight:700; color:#94a3b8;
         text-transform:uppercase; letter-spacing:0.08em; margin-bottom:6px; }
 
-  /* ── Role pills — all 5 in one row ── */
-  .rg { display:grid; grid-template-columns:repeat(3,1fr); gap:5px; margin-bottom:12px; }
+  /* ── Role pills ── */
+  .rg { display:grid; grid-template-columns:repeat(4,1fr); gap:5px; margin-bottom:12px; }
   .rp {
     display:flex; flex-direction:column; align-items:center; gap:3px;
     padding:7px 2px 6px; border-radius:10px; border:2px solid transparent;
@@ -198,6 +212,14 @@ export default function Login() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!hasAccessToken()) return
+    const user = getStoredUser()
+    if (isEmployeeOnlyAccount(user)) {
+      nav(employeePortalPath(user), { replace: true })
+    }
+  }, [nav])
+
   const handleRoleSelect = (nextRole) => {
     setRole(nextRole)
   }
@@ -230,24 +252,27 @@ export default function Login() {
       setLoading(false)
       return
     }
-    try {
-      if (document.documentElement.requestFullscreen)
-        await document.documentElement.requestFullscreen().catch(() => {})
-    } catch (_) {}
+    // Fire fullscreen as non-blocking — awaiting it delays the login flow and
+    // causes a blank-screen flash during the browser's fullscreen animation.
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(() => {})
+    }
     try {
       const pharmacyBranch = role === 'pharmacy' && branchId
-        ? { id: branchId, label: branches.find(b => b.id === branchId)?.label || '' }
+        ? { id: branchId, label: branches.find(b => String(b.id) === String(branchId))?.label || '' }
         : null
-      await useAuthStore.getState().login(normalizedEmail, password, role, pharmacyBranch)
-      nav(ROLES.find(r => r.value === role)?.path || '/staff')
+      const { user } = await useAuthStore.getState().login(normalizedEmail, password, role, pharmacyBranch)
+      const loginRole = isEmployeeOnlyAccount(user) ? 'employee' : role
+      if (loginRole !== role) {
+        useAuthStore.setState({ role: loginRole })
+        localStorage.setItem('role', loginRole)
+      }
+      nav(defaultPathForRole(loginRole, user) || ROLES.find(r => r.value === loginRole)?.path || '/staff')
       toast.success('Welcome back!')
     } catch (err) {
       const backendErrors = err?.response?.data?.errors
-      const backendDetail = backendErrors?.detail ?? err?.response?.data?.detail
       const status = err?.response?.status
-      const msg = Array.isArray(backendDetail)
-        ? backendDetail[0]
-        : (typeof backendDetail === 'string' && backendDetail.trim()) || 'Invalid email or password'
+      const msg = getApiErrorMessage(err)
       if (status === 403) {
         const allowedPharmacies = backendErrors?.allowed_pharmacy_ids
         if (role === 'pharmacy' && Array.isArray(allowedPharmacies) && allowedPharmacies.length > 0) {
@@ -257,7 +282,7 @@ export default function Login() {
           toast.error(msg || new AccountRestrictedError().message)
         }
       } else {
-        toast.error(msg)
+        toast.error('Wrong email or password')
       }
     } finally {
       setLoading(false)
@@ -322,10 +347,10 @@ export default function Login() {
                     <div className="be">⚠️ No active pharmacy branches found.</div>
                   ) : (
                     <div className="bc-row">
-                      {branches.map((b, i) => {
-                        const isSel = branchId === b.id
+                      {branches.map((b) => {
+                        const isSel = String(branchId) === String(b.id)
                         return (
-                          <div key={b.id} className={`bc${isSel ? ' sel' : ''}`} onClick={() => setBranchId(b.id)}>
+                          <div key={b.id} className={`bc${isSel ? ' sel' : ''}`} onClick={() => setBranchId(String(b.id))}>
                             {isSel && <CheckCircle2 size={15} className="bc-chk" />}
                             <div className="bc-icon"><Store size={16} /></div>
                             <div className="bc-name">{b.label}</div>

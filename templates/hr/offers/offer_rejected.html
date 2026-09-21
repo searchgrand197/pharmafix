@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offer Declined | Curevice</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --danger: #ef4444;
+            --text-dark: #1f2937;
+            --text-light: #6b7280;
+        }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: radial-gradient(circle at top right, #fef2f2 0%, #f9fafb 100%);
+            margin: 0;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            color: var(--text-dark);
+        }
+        .card {
+            background: white;
+            border-radius: 24px;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+            max-width: 500px;
+            width: 100%;
+            padding: 48px 32px;
+            text-align: center;
+        .detail-value {
+            color: #333;
+        }
+        .footer {
+            color: #999;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">✗</div>
+        <h1>Offer Rejected</h1>
+        
+        <p class="message">
+            Thank you for your response, {{ offer.candidate_name }}.<br>
+            We have received your decision to decline the offer for the position of <strong>{{ offer.job_title }}</strong>.
+        </p>
+        
+        <div class="details">
+            <h3>Offer Details</h3>
+            <div class="detail-item">
+                <span class="detail-label">Position:</span>
+                <span class="detail-value">{{ offer.job_title }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">Department:</span>
+                <span class="detail-value">{{ offer.department }}</span>
+            </div>
+            <div class="detail-item">
+                <span class="detail-label">Company:</span>
+                <span class="detail-value">{{ offer.company_name }}</span>
+            </div>
+        </div>
+        
+        <p class="message">
+            We appreciate your time and interest in {{ offer.company_name }}.<br>
+            We wish you the best in your future endeavors.
+        </p>
+        
+        <div class="footer">
+            {{ offer.company_name }} | {{ offer.company_email }}
+        </div>
+    </div>
+</body>
+</html>

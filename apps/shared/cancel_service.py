@@ -221,6 +221,64 @@ def release_payment_slip_number(payment) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Expense vouchers
+# ---------------------------------------------------------------------------
+
+def is_last_expense_voucher(expense) -> bool:
+    """Return True if this expense's slip_number matches the current last in its year's sequence."""
+    from apps.expenses.models import ExpenseSlipSequence
+    from apps.settings_management.document_number_service import render_document_number
+
+    if not expense.slip_number or str(expense.slip_number).startswith("VOID-"):
+        return False
+    now = expense.paid_at
+    year = now.year if now else None
+    if not year:
+        return False
+    seq_obj = ExpenseSlipSequence.objects.filter(hospital=expense.hospital, year=year).first()
+    if not seq_obj or seq_obj.last_seq < 1:
+        return False
+    hospital = expense.hospital
+    rendered_last = render_document_number(hospital, "expense_voucher", year, seq_obj.last_seq)
+    return expense.slip_number == rendered_last
+
+
+@transaction.atomic
+def void_expense_voucher_sequence(expense) -> bool:
+    """Roll back the expense voucher sequence if this expense is still the last (re-checked under lock)."""
+    from apps.expenses.models import ExpenseSlipSequence
+    from apps.settings_management.document_number_service import render_document_number
+
+    if not expense.slip_number or str(expense.slip_number).startswith("VOID-"):
+        return False
+    now = expense.paid_at
+    year = now.year if now else None
+    if not year:
+        return False
+    try:
+        seq_obj = ExpenseSlipSequence.objects.select_for_update().get(
+            hospital=expense.hospital, year=year
+        )
+    except ExpenseSlipSequence.DoesNotExist:
+        return False
+    if seq_obj.last_seq < 1:
+        return False
+    hospital = expense.hospital
+    rendered_last = render_document_number(hospital, "expense_voucher", year, seq_obj.last_seq)
+    if expense.slip_number != rendered_last:
+        return False
+    seq_obj.last_seq = max(seq_obj.last_seq - 1, 0)
+    seq_obj.save(update_fields=["last_seq", "updated_at"])
+    return True
+
+
+def release_expense_voucher_number(expense) -> None:
+    if not expense.slip_number or str(expense.slip_number).startswith("VOID-"):
+        return
+    expense.slip_number = _void_tombstone(expense.id, max_len=80)
+
+
+# ---------------------------------------------------------------------------
 # Billing invoices
 # ---------------------------------------------------------------------------
 

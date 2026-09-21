@@ -5,6 +5,7 @@ from .models import (
     DoctorPortalPreference,
     DoctorProfile,
     DoctorWeeklySchedule,
+    HospitalCustomRxSalt,
     Specialty,
 )
 
@@ -36,3 +37,10 @@ class DoctorDailyAvailabilityAdmin(admin.ModelAdmin):
 @admin.register(DoctorPortalPreference)
 class DoctorPortalPreferenceAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "hospital")
+
+
+@admin.register(HospitalCustomRxSalt)
+class HospitalCustomRxSaltAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "hospital", "use_count", "last_used_at", "created_by")
+    list_filter = ("hospital",)
+    search_fields = ("name", "normalized_name")

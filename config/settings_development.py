@@ -8,4 +8,7 @@ ALLOWED_HOSTS = ["*"]
 CORS_ALLOW_ALL_ORIGINS = True
 
 # Keep the backend configurable via .env (default comes from settings_common).
+# Optional: force console email in local-only debugging:
+# EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+
 

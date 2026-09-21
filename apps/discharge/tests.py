@@ -3,7 +3,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient
 
 from apps.beds.models import Bed, BedRoom, Floor
-from apps.billing.models import BillingInvoice
+from apps.billing.models import BillingInvoice, IPDFinalBill
 from apps.discharge.models import DischargeSummary, DischargeSummaryTemplate, DischargeSurgery
 from apps.ipd.models import IPDAdmission
 from apps.patients.models import Patient
@@ -174,6 +174,15 @@ class DischargeCatalogAndTemplateTests(TestCase):
             bed_number="1",
             status=Bed.Status.OCCUPIED,
         )
+        existing_final_bill = IPDFinalBill.objects.create(
+            admission=self.admission,
+            hospital=self.hospital,
+            patient=self.patient,
+            bill_no="IPDFIN-CUSTOM-2026-99",
+            patient_name="Test Patient",
+            patient_phone="9876500001",
+            room_bed="B-01",
+        )
 
         response = self.client.post(
             "/api/v1/summaries/",
@@ -197,6 +206,96 @@ class DischargeCatalogAndTemplateTests(TestCase):
         ).first()
         self.assertIsNotNone(room_invoice)
         self.assertEqual(room_invoice.status, BillingInvoice.Status.FINALIZED)
+        self.assertEqual(room_invoice.items.count(), 1)
 
         bed = Bed.objects.get(bed_code="B-01", hospital=self.hospital)
         self.assertEqual(bed.status, Bed.Status.AVAILABLE)
+
+        final_bill = IPDFinalBill.objects.get(admission=self.admission)
+        self.assertEqual(final_bill.hospital, self.hospital)
+        self.assertEqual(final_bill.patient, self.patient)
+        self.assertEqual(final_bill.id, existing_final_bill.id)
+        self.assertEqual(final_bill.bill_no, "IPDFIN-CUSTOM-2026-99")
+        self.assertEqual(final_bill.room_bed, "B-01")
+        self.assertEqual(final_bill.gross_amount, room_invoice.total_amount)
+        self.assertEqual(final_bill.net_amount, room_invoice.total_amount)
+        self.assertEqual(final_bill.items.count(), 1)
+        self.assertEqual(final_bill.items.first().description, room_invoice.items.first().description)
+
+    def _list_summary_ids(self, response):
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        rows = payload.get("results", payload.get("data", payload))
+        if isinstance(rows, dict):
+            rows = rows.get("results", rows.get("data", []))
+        return {row["id"] for row in rows}
+
+    def test_list_summaries_excludes_drafts_when_is_draft_false(self):
+        patient2 = Patient.objects.create(
+            hospital=self.hospital,
+            uhid="UHID-DS-002",
+            first_name="Final",
+            last_name="Patient",
+            gender="female",
+            phone="9876500002",
+            status="active",
+        )
+        admission2 = IPDAdmission.objects.create(
+            hospital=self.hospital,
+            patient=patient2,
+            admission_date="2026-05-02",
+            status=IPDAdmission.Status.DISCHARGED,
+            ward_name="Ward B",
+            bed_code="B-02",
+        )
+        draft_summary = DischargeSummary.objects.create(
+            admission=self.admission,
+            hospital=self.hospital,
+            is_draft=True,
+            diagnosis="Draft only",
+        )
+        final_summary = DischargeSummary.objects.create(
+            admission=admission2,
+            hospital=self.hospital,
+            is_draft=False,
+            diagnosis="Finalized",
+        )
+
+        response = self.client.get("/api/v1/summaries/?is_draft=false&limit=500")
+        ids = self._list_summary_ids(response)
+        self.assertIn(str(final_summary.id), ids)
+        self.assertNotIn(str(draft_summary.id), ids)
+
+    def test_list_summaries_includes_drafts_when_unfiltered(self):
+        patient2 = Patient.objects.create(
+            hospital=self.hospital,
+            uhid="UHID-DS-003",
+            first_name="Another",
+            last_name="Patient",
+            gender="male",
+            phone="9876500003",
+            status="active",
+        )
+        admission2 = IPDAdmission.objects.create(
+            hospital=self.hospital,
+            patient=patient2,
+            admission_date="2026-05-03",
+            status=IPDAdmission.Status.DISCHARGED,
+            ward_name="Ward C",
+            bed_code="B-03",
+        )
+        draft_summary = DischargeSummary.objects.create(
+            admission=self.admission,
+            hospital=self.hospital,
+            is_draft=True,
+        )
+        final_summary = DischargeSummary.objects.create(
+            admission=admission2,
+            hospital=self.hospital,
+            is_draft=False,
+        )
+
+        response = self.client.get("/api/v1/summaries/?limit=500")
+        ids = self._list_summary_ids(response)
+        self.assertIn(str(draft_summary.id), ids)
+        self.assertIn(str(final_summary.id), ids)

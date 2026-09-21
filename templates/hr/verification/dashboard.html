@@ -1,0 +1,1314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HR Document Verification Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-color: #2563eb;
+            --secondary-color: #64748b;
+            --success-color: #10b981;
+            --warning-color: #f59e0b;
+            --danger-color: #ef4444;
+            --light-bg: #f8fafc;
+            --border-color: #e2e8f0;
+            --sidebar-width: 400px;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: var(--light-bg);
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .dashboard-container {
+            display: flex;
+            height: 100vh;
+        }
+
+        /* Header */
+        .dashboard-header {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 70px;
+            background: white;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 2rem;
+            z-index: 1000;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .header-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .header-title i {
+            color: var(--primary-color);
+        }
+
+        .header-stats {
+            display: flex;
+            gap: 2rem;
+        }
+
+        .stat-item {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #1e293b;
+        }
+
+        .stat-label {
+            font-size: 0.75rem;
+            color: var(--secondary-color);
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        /* Main Content */
+        .main-content {
+            display: flex;
+            margin-top: 70px;
+            height: calc(100vh - 70px);
+        }
+
+        /* Left Panel - Employee List */
+        .left-panel {
+            width: var(--sidebar-width);
+            background: white;
+            border-right: 1px solid var(--border-color);
+            overflow-y: auto;
+            flex-shrink: 0;
+        }
+
+        .panel-header {
+            padding: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            background: #fafafa;
+        }
+
+        .panel-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #1e293b;
+            margin-bottom: 0.5rem;
+        }
+
+        .panel-subtitle {
+            font-size: 0.875rem;
+            color: var(--secondary-color);
+        }
+
+        .employee-list {
+            padding: 0;
+        }
+
+        .employee-card {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            position: relative;
+        }
+
+        .employee-card:hover {
+            background: #f8fafc;
+        }
+
+        .employee-card.active {
+            background: #eff6ff;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .employee-card.completed {
+            background: #f0fdf4;
+            border-left: 4px solid var(--success-color);
+        }
+
+        .employee-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 0.5rem;
+        }
+
+        .employee-name {
+            font-weight: 600;
+            color: #1e293b;
+            font-size: 0.95rem;
+        }
+
+        .employee-status {
+            padding: 0.25rem 0.5rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .status-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .status-review {
+            background: #dbeafe;
+            color: #1e40af;
+        }
+
+        .status-ready {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .employee-details {
+            font-size: 0.875rem;
+            color: var(--secondary-color);
+            margin-bottom: 0.75rem;
+        }
+
+        .progress-container {
+            margin-top: 0.5rem;
+        }
+
+        .progress-label {
+            font-size: 0.75rem;
+            color: var(--secondary-color);
+            margin-bottom: 0.25rem;
+        }
+
+        .progress {
+            height: 6px;
+            background: var(--border-color);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar {
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-bar-success {
+            background: var(--success-color);
+        }
+
+        .progress-bar-warning {
+            background: var(--warning-color);
+        }
+
+        /* Right Panel - Document Viewer */
+        .right-panel {
+            flex: 1;
+            background: white;
+            overflow-y: auto;
+        }
+
+        .document-viewer {
+            padding: 2rem;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 4rem 2rem;
+            color: var(--secondary-color);
+        }
+
+        .empty-state i {
+            font-size: 4rem;
+            color: #cbd5e1;
+            margin-bottom: 1rem;
+        }
+
+        .empty-state h3 {
+            font-size: 1.25rem;
+            color: #64748b;
+            margin-bottom: 0.5rem;
+        }
+
+        /* Employee Info Section */
+        .employee-info {
+            background: linear-gradient(135deg, var(--primary-color), #1e40af);
+            color: white;
+            padding: 2rem;
+            border-radius: 12px;
+            margin-bottom: 2rem;
+        }
+
+        .employee-info-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 1.5rem;
+        }
+
+        .employee-info-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .employee-info-subtitle {
+            opacity: 0.9;
+            font-size: 0.95rem;
+        }
+
+        .employee-info-details {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+
+        .info-item {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 0.75rem;
+            border-radius: 8px;
+        }
+
+        .info-label {
+            font-size: 0.75rem;
+            opacity: 0.8;
+            margin-bottom: 0.25rem;
+        }
+
+        .info-value {
+            font-weight: 600;
+        }
+
+        /* Document Cards */
+        .documents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .document-card {
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .document-card:hover {
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .document-card.verified {
+            border-color: var(--success-color);
+            background: #f0fdf4;
+        }
+
+        .document-card.rejected {
+            border-color: var(--danger-color);
+            background: #fef2f2;
+        }
+
+        .document-header {
+            padding: 1rem;
+            background: #fafafa;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .document-title {
+            font-weight: 600;
+            color: #1e293b;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .document-status {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .doc-status-missing {
+            background: #f1f5f9;
+            color: var(--secondary-color);
+        }
+
+        .doc-status-pending {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .doc-status-verified {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .doc-status-rejected {
+            background: #fee2e2;
+            color: #991b1b;
+        }
+
+        .document-content {
+            padding: 1rem;
+        }
+
+        .document-preview {
+            background: #f8fafc;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 1rem;
+            text-align: center;
+            min-height: 120px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+
+        .document-preview i {
+            font-size: 2rem;
+            color: var(--secondary-color);
+        }
+
+        .document-info {
+            font-size: 0.875rem;
+            color: var(--secondary-color);
+            margin-bottom: 1rem;
+        }
+
+        .document-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .btn-action {
+            padding: 0.5rem 1rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-approve {
+            background: var(--success-color);
+            color: white;
+        }
+
+        .btn-approve:hover {
+            background: #059669;
+        }
+
+        .btn-reject {
+            background: var(--danger-color);
+            color: white;
+        }
+
+        .btn-reject:hover {
+            background: #dc2626;
+        }
+
+        .btn-reupload {
+            background: var(--warning-color);
+            color: white;
+        }
+
+        .btn-reupload:hover {
+            background: #d97706;
+        }
+
+        .btn-download {
+            background: var(--secondary-color);
+            color: white;
+        }
+
+        .btn-download:hover {
+            background: #475569;
+        }
+
+        /* Summary Section */
+        .summary-section {
+            background: #f8fafc;
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .summary-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .summary-title {
+            font-size: 1.125rem;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .summary-stat {
+            text-align: center;
+            padding: 1rem;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .summary-stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+        }
+
+        .summary-stat-label {
+            font-size: 0.75rem;
+            color: var(--secondary-color);
+            text-transform: uppercase;
+        }
+
+        .progress-section {
+            margin-top: 1rem;
+        }
+
+        /* Final Action */
+        .final-action {
+            text-align: center;
+            padding: 2rem;
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            border-radius: 12px;
+        }
+
+        .final-action h3 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+        }
+
+        .btn-final {
+            background: white;
+            color: var(--success-color);
+            border: none;
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .btn-final:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        /* Modal */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal.active {
+            display: flex;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1e293b;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            color: var(--secondary-color);
+            cursor: pointer;
+        }
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-label {
+            display: block;
+            font-weight: 500;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 0.875rem;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: flex-end;
+            margin-top: 1.5rem;
+        }
+
+        .btn-cancel {
+            background: #f3f4f6;
+            color: #374151;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        .btn-confirm {
+            background: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+        }
+
+        /* Loading */
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            color: var(--secondary-color);
+        }
+
+        .loading i {
+            animation: spin 1s linear infinite;
+            margin-right: 0.5rem;
+        }
+
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .left-panel {
+                width: 350px;
+            }
+            
+            .documents-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-container {
+                flex-direction: column;
+            }
+            
+            .left-panel {
+                width: 100%;
+                height: 300px;
+                border-right: none;
+                border-bottom: 1px solid var(--border-color);
+            }
+            
+            .main-content {
+                flex-direction: column;
+                height: auto;
+            }
+            
+            .header-stats {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="dashboard-container">
+        <!-- Header -->
+        <header class="dashboard-header">
+            <div class="header-title">
+                <i class="fas fa-file-check"></i>
+                HR Document Verification Dashboard
+            </div>
+            <div class="header-stats">
+                <div class="stat-item">
+                    <div class="stat-value" id="totalEmployees">0</div>
+                    <div class="stat-label">Total Employees</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="verifiedDocs">0</div>
+                    <div class="stat-label">Verified</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="pendingDocs">0</div>
+                    <div class="stat-label">Pending</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="progressPercentage">0%</div>
+                    <div class="stat-label">Progress</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel - Employee List -->
+            <aside class="left-panel">
+                <div class="panel-header">
+                    <h2 class="panel-title">Onboarding Queue</h2>
+                    <p class="panel-subtitle">Employees pending document verification</p>
+                </div>
+                <div class="employee-list" id="employeeList">
+                    <div class="loading">
+                        <i class="fas fa-spinner"></i>
+                        Loading employees...
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Right Panel - Document Viewer -->
+            <main class="right-panel">
+                <div class="document-viewer" id="documentViewer">
+                    <div class="empty-state">
+                        <i class="fas fa-users"></i>
+                        <h3>Select an Employee</h3>
+                        <p>Choose an employee from the left panel to view and verify their documents</p>
+                    </div>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Reject Modal -->
+    <div class="modal" id="rejectModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Reject Document</h3>
+                <button class="modal-close" onclick="closeRejectModal()">&times;</button>
+            </div>
+            <form id="rejectForm">
+                <div class="form-group">
+                    <label class="form-label">Reason for Rejection</label>
+                    <textarea class="form-control" id="rejectionReason" rows="4" placeholder="Please provide a reason for rejecting this document..." required></textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="closeRejectModal()">Cancel</button>
+                    <button type="submit" class="btn-confirm">Reject Document</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Re-upload Modal -->
+    <div class="modal" id="reuploadModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title">Request Re-upload</h3>
+                <button class="modal-close" onclick="closeReuploadModal()">&times;</button>
+            </div>
+            <form id="reuploadForm">
+                <div class="form-group">
+                    <label class="form-label">Reason for Re-upload Request</label>
+                    <textarea class="form-control" id="reuploadReason" rows="4" placeholder="Please specify what needs to be corrected...">Please re-upload this document with the required corrections.</textarea>
+                </div>
+                <div class="modal-actions">
+                    <button type="button" class="btn-cancel" onclick="closeReuploadModal()">Cancel</button>
+                    <button type="submit" class="btn-confirm">Request Re-upload</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // Global state
+        let employees = [];
+        let selectedEmployee = null;
+        let employeeDocuments = [];
+        let currentDocumentId = null;
+
+        // Initialize dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            loadSummary();
+            loadEmployees();
+        });
+
+        // Load summary statistics
+        async function loadSummary() {
+            try {
+                const response = await fetch('/api/verification/summary/');
+                const data = await response.json();
+                
+                if (data.success) {
+                    const summary = data.summary;
+                    document.getElementById('totalEmployees').textContent = summary.total_employees;
+                    document.getElementById('verifiedDocs').textContent = summary.verified_documents;
+                    document.getElementById('pendingDocs').textContent = summary.pending_documents;
+                    document.getElementById('progressPercentage').textContent = summary.verification_progress + '%';
+                }
+            } catch (error) {
+                console.error('Error loading summary:', error);
+            }
+        }
+
+        // Load employees list
+        async function loadEmployees() {
+            try {
+                const response = await fetch('/api/verification/employees/');
+                const data = await response.json();
+                
+                if (data.success) {
+                    employees = data.employees;
+                    renderEmployeeList();
+                } else {
+                    showError('Failed to load employees');
+                }
+            } catch (error) {
+                console.error('Error loading employees:', error);
+                showError('Failed to load employees');
+            }
+        }
+
+        // Render employee list
+        function renderEmployeeList() {
+            const employeeList = document.getElementById('employeeList');
+            
+            if (employees.length === 0) {
+                employeeList.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-user-check"></i>
+                        <h3>No Employees</h3>
+                        <p>No employees are currently in the onboarding queue</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            employeeList.innerHTML = employees.map(employee => `
+                <div class="employee-card ${selectedEmployee?.id === employee.id ? 'active' : ''} ${employee.onboarding_status === 'ready_to_join' ? 'completed' : ''}" 
+                     onclick="selectEmployee(${employee.id})">
+                    <div class="employee-header">
+                        <div class="employee-name">${employee.name}</div>
+                        <div class="employee-status ${getStatusClass(employee.onboarding_status)}">
+                            ${employee.status_display}
+                        </div>
+                    </div>
+                    <div class="employee-details">
+                        <div>${employee.job_title}</div>
+                        <div>${employee.department}</div>
+                    </div>
+                    <div class="progress-container">
+                        <div class="progress-label">Progress: ${employee.verified_documents}/5 documents</div>
+                        <div class="progress">
+                            <div class="progress-bar ${employee.progress_percentage === 100 ? 'progress-bar-success' : 'progress-bar-warning'}" 
+                                 style="width: ${employee.progress_percentage}%"></div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // Select employee
+        async function selectEmployee(employeeId) {
+            selectedEmployee = employees.find(emp => emp.id === employeeId);
+            
+            // Update active state
+            document.querySelectorAll('.employee-card').forEach(card => {
+                card.classList.remove('active');
+            });
+            event.currentTarget.classList.add('active');
+            
+            // Load employee documents
+            await loadEmployeeDocuments(employeeId);
+            renderDocumentViewer();
+        }
+
+        // Load employee documents
+        async function loadEmployeeDocuments(employeeId) {
+            try {
+                const response = await fetch(`/api/verification/employee/${employeeId}/documents/`);
+                const data = await response.json();
+                
+                if (data.success) {
+                    employeeDocuments = data.documents;
+                    selectedEmployee = data.employee;
+                } else {
+                    showError('Failed to load documents');
+                }
+            } catch (error) {
+                console.error('Error loading documents:', error);
+                showError('Failed to load documents');
+            }
+        }
+
+        // Render document viewer
+        function renderDocumentViewer() {
+            const viewer = document.getElementById('documentViewer');
+            
+            if (!selectedEmployee) {
+                viewer.innerHTML = `
+                    <div class="empty-state">
+                        <i class="fas fa-users"></i>
+                        <h3>Select an Employee</h3>
+                        <p>Choose an employee from the left panel to view and verify their documents</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const allVerified = employeeDocuments.filter(doc => doc.status === 'verified').length === 5;
+            
+            viewer.innerHTML = `
+                <!-- Employee Info -->
+                <div class="employee-info">
+                    <div class="employee-info-header">
+                        <div>
+                            <h2 class="employee-info-title">${selectedEmployee.name}</h2>
+                            <p class="employee-info-subtitle">${selectedEmployee.job_title} • ${selectedEmployee.department}</p>
+                        </div>
+                        <div class="employee-status ${getStatusClass(selectedEmployee.onboarding_status)}">
+                            ${selectedEmployee.status_display}
+                        </div>
+                    </div>
+                    <div class="employee-info-details">
+                        <div class="info-item">
+                            <div class="info-label">Email</div>
+                            <div class="info-value">${selectedEmployee.email}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Phone</div>
+                            <div class="info-value">${selectedEmployee.phone || 'Not provided'}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Joining Date</div>
+                            <div class="info-value">${selectedEmployee.joining_date || 'Not set'}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Summary Section -->
+                <div class="summary-section">
+                    <div class="summary-header">
+                        <h3 class="summary-title">Document Summary</h3>
+                    </div>
+                    <div class="summary-stats">
+                        <div class="summary-stat">
+                            <div class="summary-stat-value">${employeeDocuments.length}</div>
+                            <div class="summary-stat-label">Total</div>
+                        </div>
+                        <div class="summary-stat">
+                            <div class="summary-stat-value" style="color: var(--success-color)">${employeeDocuments.filter(doc => doc.status === 'verified').length}</div>
+                            <div class="summary-stat-label">Verified</div>
+                        </div>
+                        <div class="summary-stat">
+                            <div class="summary-stat-value" style="color: var(--warning-color)">${employeeDocuments.filter(doc => doc.status === 'uploaded').length}</div>
+                            <div class="summary-stat-label">Pending</div>
+                        </div>
+                        <div class="summary-stat">
+                            <div class="summary-stat-value" style="color: var(--danger-color)">${employeeDocuments.filter(doc => doc.status === 'rejected').length}</div>
+                            <div class="summary-stat-label">Rejected</div>
+                        </div>
+                    </div>
+                    <div class="progress-section">
+                        <div class="progress">
+                            <div class="progress-bar progress-bar-success" style="width: ${(employeeDocuments.filter(doc => doc.status === 'verified').length / 5) * 100}%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Documents Grid -->
+                <div class="documents-grid">
+                    ${employeeDocuments.map(doc => renderDocumentCard(doc)).join('')}
+                </div>
+
+                <!-- Final Action -->
+                ${allVerified ? `
+                    <div class="final-action">
+                        <h3>All Documents Verified!</h3>
+                        <p>This employee is ready to join the organization</p>
+                        <button class="btn-final" onclick="markReadyToJoin()">
+                            <i class="fas fa-check-circle"></i> Mark Employee Ready to Join
+                        </button>
+                    </div>
+                ` : ''}
+            `;
+        }
+
+        // Render document card
+        function renderDocumentCard(doc) {
+            const cardClass = doc.status === 'verified' ? 'verified' : doc.status === 'rejected' ? 'rejected' : '';
+            
+            return `
+                <div class="document-card ${cardClass}">
+                    <div class="document-header">
+                        <div class="document-title">
+                            <i class="fas fa-file-alt"></i>
+                            ${doc.document_label}
+                        </div>
+                        <div class="document-status ${getDocumentStatusClass(doc.status)}">
+                            ${doc.status_display}
+                        </div>
+                    </div>
+                    <div class="document-content">
+                        ${doc.file_url ? `
+                            <div class="document-preview">
+                                ${doc.file_name?.toLowerCase().includes('pdf') ? 
+                                    `<i class="fas fa-file-pdf"></i>` : 
+                                    `<i class="fas fa-file-image"></i>`
+                                }
+                            </div>
+                            <div class="document-info">
+                                <div>File: ${doc.file_name}</div>
+                                <div>Uploaded: ${doc.uploaded_at || 'Unknown'}</div>
+                                ${doc.verified_at ? `<div>Verified: ${doc.verified_at} by ${doc.verified_by}</div>` : ''}
+                                ${doc.rejection_reason ? `<div style="color: var(--danger-color)">Reason: ${doc.rejection_reason}</div>` : ''}
+                            </div>
+                            <div class="document-actions">
+                                ${doc.file_url ? `<button class="btn-action btn-download" onclick="downloadDocument('${doc.file_url}', '${doc.file_name}')">
+                                    <i class="fas fa-download"></i> Download
+                                </button>` : ''}
+                                ${doc.status === 'uploaded' ? `
+                                    <button class="btn-action btn-approve" onclick="approveDocument(${doc.id})">
+                                        <i class="fas fa-check"></i> Approve
+                                    </button>
+                                    <button class="btn-action btn-reject" onclick="openRejectModal(${doc.id})">
+                                        <i class="fas fa-times"></i> Reject
+                                    </button>
+                                ` : ''}
+                                ${doc.status === 'rejected' ? `
+                                    <button class="btn-action btn-reupload" onclick="openReuploadModal(${doc.id})">
+                                        <i class="fas fa-sync"></i> Request Re-upload
+                                    </button>
+                                ` : ''}
+                            </div>
+                        ` : `
+                            <div class="document-preview">
+                                <i class="fas fa-file-upload"></i>
+                            </div>
+                            <div class="document-info">
+                                <div>Document not uploaded yet</div>
+                            </div>
+                            <div class="document-actions">
+                                <button class="btn-action btn-download" disabled>
+                                    <i class="fas fa-download"></i> Not Available
+                                </button>
+                            </div>
+                        `}
+                    </div>
+                </div>
+            `;
+        }
+
+        // Approve document
+        async function approveDocument(documentId) {
+            try {
+                const response = await fetch(`/api/verification/document/${documentId}/approve/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('Document approved successfully');
+                    await loadEmployeeDocuments(selectedEmployee.id);
+                    renderDocumentViewer();
+                    loadSummary(); // Update summary
+                    loadEmployees(); // Update employee list
+                } else {
+                    showError(data.error || 'Failed to approve document');
+                }
+            } catch (error) {
+                console.error('Error approving document:', error);
+                showError('Failed to approve document');
+            }
+        }
+
+        // Reject document
+        async function rejectDocument(documentId, reason) {
+            try {
+                const response = await fetch(`/api/verification/document/${documentId}/reject/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        rejection_reason: reason
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('Document rejected successfully');
+                    closeRejectModal();
+                    await loadEmployeeDocuments(selectedEmployee.id);
+                    renderDocumentViewer();
+                    loadSummary(); // Update summary
+                    loadEmployees(); // Update employee list
+                } else {
+                    showError(data.error || 'Failed to reject document');
+                }
+            } catch (error) {
+                console.error('Error rejecting document:', error);
+                showError('Failed to reject document');
+            }
+        }
+
+        // Request re-upload
+        async function requestReupload(documentId, reason) {
+            try {
+                const response = await fetch(`/api/verification/document/${documentId}/request-reupload/`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCookie('csrftoken')
+                    },
+                    body: JSON.stringify({
+                        reason: reason
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('Re-upload requested successfully');
+                    closeReuploadModal();
+                    await loadEmployeeDocuments(selectedEmployee.id);
+                    renderDocumentViewer();
+                    loadSummary(); // Update summary
+                    loadEmployees(); // Update employee list
+                } else {
+                    showError(data.error || 'Failed to request re-upload');
+                }
+            } catch (error) {
+                console.error('Error requesting re-upload:', error);
+                showError('Failed to request re-upload');
+            }
+        }
+
+        // Mark employee ready to join
+        async function markReadyToJoin() {
+            if (!confirm('Are you sure you want to mark this employee as ready to join? This action cannot be undone.')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`/api/verification/employee/${selectedEmployee.id}/mark-ready/`, {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRFToken': getCookie('csrftoken')
+                    }
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showSuccess('Employee marked as ready to join successfully');
+                    await loadEmployees();
+                    renderEmployeeList();
+                    await loadEmployeeDocuments(selectedEmployee.id);
+                    renderDocumentViewer();
+                    loadSummary(); // Update summary
+                } else {
+                    showError(data.error || 'Failed to mark employee as ready to join');
+                }
+            } catch (error) {
+                console.error('Error marking ready to join:', error);
+                showError('Failed to mark employee as ready to join');
+            }
+        }
+
+        // Download document
+        function downloadDocument(fileUrl, fileName) {
+            const link = document.createElement('a');
+            link.href = fileUrl;
+            link.download = fileName;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        // Modal functions
+        function openRejectModal(documentId) {
+            currentDocumentId = documentId;
+            document.getElementById('rejectModal').classList.add('active');
+            document.getElementById('rejectionReason').focus();
+        }
+
+        function closeRejectModal() {
+            document.getElementById('rejectModal').classList.remove('active');
+            document.getElementById('rejectForm').reset();
+            currentDocumentId = null;
+        }
+
+        function openReuploadModal(documentId) {
+            currentDocumentId = documentId;
+            document.getElementById('reuploadModal').classList.add('active');
+            document.getElementById('reuploadReason').focus();
+        }
+
+        function closeReuploadModal() {
+            document.getElementById('reuploadModal').classList.remove('active');
+            document.getElementById('reuploadForm').reset();
+            currentDocumentId = null;
+        }
+
+        // Form submissions
+        document.getElementById('rejectForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const reason = document.getElementById('rejectionReason').value.trim();
+            if (reason) {
+                rejectDocument(currentDocumentId, reason);
+            }
+        });
+
+        document.getElementById('reuploadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const reason = document.getElementById('reuploadReason').value.trim();
+            if (reason) {
+                requestReupload(currentDocumentId, reason);
+            }
+        });
+
+        // Utility functions
+        function getStatusClass(status) {
+            switch (status) {
+                case 'pending_documents': return 'status-pending';
+                case 'under_review': return 'status-review';
+                case 'ready_to_join': return 'status-ready';
+                default: return 'status-pending';
+            }
+        }
+
+        function getDocumentStatusClass(status) {
+            switch (status) {
+                case 'missing': return 'doc-status-missing';
+                case 'uploaded': return 'doc-status-pending';
+                case 'verified': return 'doc-status-verified';
+                case 'rejected': return 'doc-status-rejected';
+                default: return 'doc-status-missing';
+            }
+        }
+
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+        }
+
+        function showSuccess(message) {
+            // Simple success notification
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-success';
+            notification.style.cssText = 'position: fixed; top: 80px; right: 20px; z-index: 3000; min-width: 300px;';
+            notification.innerHTML = `<i class="fas fa-check-circle"></i> ${message}`;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        function showError(message) {
+            // Simple error notification
+            const notification = document.createElement('div');
+            notification.className = 'alert alert-danger';
+            notification.style.cssText = 'position: fixed; top: 80px; right: 20px; z-index: 3000; min-width: 300px;';
+            notification.innerHTML = `<i class="fas fa-exclamation-circle"></i> ${message}`;
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 5000);
+        }
+
+        // Close modals on escape key
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') {
+                closeRejectModal();
+                closeReuploadModal();
+            }
+        });
+
+        // Close modals on background click
+        document.getElementById('rejectModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeRejectModal();
+            }
+        });
+
+        document.getElementById('reuploadModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeReuploadModal();
+            }
+        });
+    </script>
+</body>
+</html>

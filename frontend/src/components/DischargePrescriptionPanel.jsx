@@ -157,7 +157,7 @@ export default function DischargePrescriptionPanel({
 
       {open && (
         <div className="bg-white border-t border-emerald-100">
-          {branches.length > 1 && (
+          {branches.length >= 1 && (
             <div className="px-3 py-1.5 border-b border-slate-100 flex items-center gap-2">
               <span className="text-[10px] font-bold text-slate-500 uppercase">Pharmacy branch:</span>
               <select value={branchId} onChange={(e) => { setBranchId(e.target.value); setResults([]) }}
@@ -220,6 +220,12 @@ export default function DischargePrescriptionPanel({
                 )
               })}
             </div>
+          )}
+
+          {!searching && search.trim().length >= 1 && results.length === 0 && branchId && (
+            <p className="mx-3 mb-2 text-[10px] text-slate-500 bg-slate-50 border border-slate-100 rounded-md px-2 py-1.5">
+              No stock found for “{search.trim()}” in this pharmacy. Try another spelling or add it manually.
+            </p>
           )}
 
           {(items || []).length > 0 && (

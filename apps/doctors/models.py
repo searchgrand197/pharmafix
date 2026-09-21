@@ -166,3 +166,32 @@ class DoctorPortalPreference(TimeStampedModel, UUIDPrimaryKeyModel):
 
     def __str__(self) -> str:
         return f"DoctorPortalPreference<{self.user_id}>"
+
+
+class HospitalCustomRxSalt(TimeStampedModel, UUIDPrimaryKeyModel):
+    """Hospital-wide custom medicine names for doctor not-in-pharmacy prescribing."""
+
+    hospital = models.ForeignKey(Hospital, on_delete=models.CASCADE, related_name="custom_rx_salts")
+    name = models.CharField(max_length=200)
+    normalized_name = models.CharField(max_length=200)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_custom_rx_salts",
+    )
+    last_used_at = models.DateTimeField(default=timezone.now)
+    use_count = models.PositiveIntegerField(default=1)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["hospital", "normalized_name"],
+                name="custom_rx_salt_hosp_norm_uniq",
+            ),
+        ]
+        indexes = [models.Index(fields=["hospital", "-last_used_at"])]
+
+    def __str__(self) -> str:
+        return self.name

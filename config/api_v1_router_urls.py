@@ -23,6 +23,7 @@ from apps.doctors.views import (
     DoctorPortalPreferenceView,
     DoctorProfileViewSet,
     DoctorWeeklyScheduleViewSet,
+    HospitalCustomRxSaltListCreateView,
     SpecialtyViewSet,
 )
 from apps.followups.views import FollowUpViewSet
@@ -37,6 +38,12 @@ from apps.ipd.scheme_views import SchemeViewSet
 from apps.ipd.views import IPDAdmissionViewSet
 from apps.opd.views import OPDVisitViewSet, follow_up_alerts
 from apps.patients.views import PatientViewSet
+from apps.expenses.views import (
+    ExpenseTransactionViewSet,
+    expense_parties,
+    expense_party_detail,
+    expense_quick_services,
+)
 from apps.payments.views import PaymentTransactionViewSet, payment_quick_services
 from apps.roles_permissions.designation_permission_views import DesignationPermissionProfileViewSet
 from apps.roles_permissions.user_permission_views import UserPermissionProfileViewSet
@@ -111,6 +118,7 @@ router.register(r"medicine-categories", MedicineCategoryViewSet, basename="medic
 router.register(r"opd-visits", OPDVisitViewSet, basename="opd-visits")
 router.register(r"patients", PatientViewSet, basename="patients")
 router.register(r"payments", PaymentTransactionViewSet, basename="payments")
+router.register(r"expenses", ExpenseTransactionViewSet, basename="expenses")
 router.register(r"shifts", ShiftViewSet, basename="shifts")
 router.register(r"specialties", SpecialtyViewSet, basename="specialties")
 router.register(r"staff", StaffProfileViewSet, basename="staff")
@@ -152,12 +160,14 @@ router.register(r"lab/categories", LabTestCategoryViewSet, basename="lab-categor
 router.register(r"lab/tests", LabTestViewSet, basename="lab-tests")
 router.register(r"lab/reports", LabReportViewSet, basename="lab-reports")
 router.register(r"lab/results", LabTestResultViewSet, basename="lab-results")
+router.register(r"lab/test-results", LabTestResultViewSet, basename="lab-test-results")
 router.register(r"pharmacy/invoices", PharmacyInvoiceViewSet, basename="pharmacy-invoices")
 router.register(r"pharmacy/items", PharmacyInvoiceItemViewSet, basename="pharmacy-items")
 router.register(r"pharmacy/suppliers", PharmacySupplierViewSet, basename="pharmacy-suppliers")
 
 urlpatterns = [
     path("doctors/portal-preferences/", DoctorPortalPreferenceView.as_view(), name="doctors-portal-preferences"),
+    path("doctors/custom-rx-salts/", HospitalCustomRxSaltListCreateView.as_view(), name="doctors-custom-rx-salts"),
     path("doctor-analytics/", DoctorFinancialAnalyticsView.as_view(), name="doctor-analytics"),
     path("follow-up-alerts/", follow_up_alerts, name="follow-up-alerts"),
     path("pharmacy/dashboard/", PharmacyDashboardView.as_view(), name="pharmacy-dashboard"),
@@ -174,6 +184,9 @@ urlpatterns = [
     path("purchase/history/", PurchaseHistoryListView.as_view(), name="purchase-history"),
     path("purchase/history/<uuid:pk>/", PurchaseHistoryDetailView.as_view(), name="purchase-history-detail"),
     path("payments/quick-services/", payment_quick_services, name="payments-quick-services"),
+    path("expenses/quick-services/", expense_quick_services, name="expenses-quick-services"),
+    path("expenses/parties/", expense_parties, name="expenses-parties"),
+    path("expenses/parties/<uuid:party_id>/", expense_party_detail, name="expenses-party-detail"),
     path("treatment/patient-overview/", PatientPlanOverviewView.as_view(), name="treatment-patient-overview"),
     path(
         "treatment/template-package-catalog/",

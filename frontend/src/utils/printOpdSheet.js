@@ -1,4 +1,4 @@
-import { buildPrintHtml } from '../components/OpdTemplateEditor/buildPrintHtml'
+import { buildPrintHtml, buildRxOnlyPrintHtml } from '../components/OpdTemplateEditor/buildPrintHtml'
 import { getDefaultOpdFieldConfig, normalizeOpdFieldConfig } from '../components/OpdTemplateEditor/opdCoreFields.js'
 import { syncCoreFieldsIntoLayout } from '../components/OpdTemplateEditor/syncCoreFieldsIntoLayout.js'
 import { writeHtmlInHiddenIframe } from './printHtmlInHiddenFrame.js'
@@ -47,6 +47,7 @@ export async function printOpdSheet({
   withBackground = true,
   layout = null,
   opdFieldConfig = null,
+  rxPrintData = null,
 } = {}) {
   const cfg = opdFieldConfig || await fetchReceptionOpdFieldConfig()
   const slipLayout = layout || await fetchOpdSlipLayout(cfg)
@@ -54,6 +55,26 @@ export async function printOpdSheet({
     throw new Error('Could not load OPD template layout. Please save the layout in the OPD editor first.')
   }
 
-  const html = buildPrintHtml(slipLayout, values, withBackground, cfg)
+  const html = buildPrintHtml(slipLayout, values, withBackground, cfg, rxPrintData)
+  writeHtmlInHiddenIframe(html, { autoPrint: false })
+}
+
+/** Print only prescription content at the saved rx_box position — no background or patient fields. */
+export async function printRxOnly({
+  layout = null,
+  rxPrintData = null,
+} = {}) {
+  const slipLayout = layout || await loadOpdSlipLayoutForPrint()
+  if (!slipLayout?.rx_box) {
+    throw new Error('Could not load prescription box layout. Please configure the Prescription Box in the OPD editor first.')
+  }
+
+  const html = buildRxOnlyPrintHtml(slipLayout, rxPrintData)
   writeHtmlInHiddenIframe(html)
+}
+
+/** Load saved OPD slip layout (for print defaults / rx_box config). */
+export async function loadOpdSlipLayoutForPrint() {
+  const cfg = await fetchReceptionOpdFieldConfig()
+  return fetchOpdSlipLayout(cfg)
 }

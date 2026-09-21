@@ -9,7 +9,7 @@ from rest_framework.filters import SearchFilter, OrderingFilter
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
 
-from apps.opd.models import OPDVisit, OPDVisitSequence, OPDVisitStatusHistory
+from apps.opd.models import OPDVisit, OPDPaymentSlipSequence, OPDVisitSequence, OPDVisitStatusHistory
 from apps.settings_management.document_number_service import render_document_number
 from apps.shared.models import Hospital
 from apps.opd.serializers import OPDVisitCreateUpdateSerializer, OPDVisitSerializer
@@ -39,7 +39,7 @@ class OPDVisitViewSet(viewsets.ModelViewSet):
         "patient__last_name",
     )
     ordering_fields = ("created_at", "visit_date")
-    ordering = ("-created_at",)
+    ordering = ("-visit_date", "-created_at")
 
     permission_classes = [permissions.IsAuthenticated, HasRequiredPermission]
 
@@ -52,6 +52,7 @@ class OPDVisitViewSet(viewsets.ModelViewSet):
         "cancel": "opd.update_opd_visit",
         "destroy": "opd.delete_opd_visit",
         "next_opd_no": "opd.view_opd_visit",
+        "generate_payment_slip": "opd.view_opd_visit",
     }
 
     def get_serializer_class(self):
@@ -141,6 +142,10 @@ class OPDVisitViewSet(viewsets.ModelViewSet):
 
         old_status = visit.status
         serializer.save()
+        visit_datetime = getattr(serializer, "_visit_datetime", None)
+        if visit_datetime is not None:
+            OPDVisit.objects.filter(pk=visit.pk).update(created_at=visit_datetime)
+            serializer.instance.refresh_from_db()
         new_status = serializer.instance.status
         if new_status != old_status:
             OPDVisitStatusHistory.objects.create(
@@ -232,6 +237,23 @@ class OPDVisitViewSet(viewsets.ModelViewSet):
         ).get(pk=visit.pk)
         data = OPDVisitSerializer(visit_full, context=self.get_serializer_context()).data
         return success_response(data=data)
+
+    @action(detail=True, methods=["post"], url_path="payment-slip")
+    @transaction.atomic
+    def generate_payment_slip(self, request, pk=None):
+        visit: OPDVisit = self.get_object()
+        if not visit.amount:
+            return Response(
+                {"success": False, "detail": "No payment amount recorded for this visit."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not visit.opd_payment_slip_no:
+            visit.opd_payment_slip_no = visit.generate_opd_payment_slip_no()
+            visit.save(update_fields=["opd_payment_slip_no", "updated_at"])
+        return success_response({
+            "slip_number": visit.opd_payment_slip_no,
+            "visit_id": str(visit.id),
+        })
 
 from datetime import date, timedelta
 from rest_framework.decorators import api_view, permission_classes

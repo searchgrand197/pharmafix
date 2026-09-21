@@ -1,6 +1,7 @@
+from datetime import datetime, time
 from decimal import Decimal
 
-from django.db.models import Q, Sum
+from django.db.models import F, Q, Sum
 from django.utils.dateparse import parse_date, parse_datetime, parse_time
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
@@ -18,6 +19,7 @@ from apps.discharge.models import (
 )
 from apps.discharge.serializers import DischargeSummarySerializer, DischargeSummaryTemplateSerializer
 from apps.ipd.models import IPDAdmission
+from apps.billing.final_bill_utils import next_ipd_final_bill_number
 from apps.billing.models import BillingInvoice
 from apps.billing.collection_attribution import apply_attribution_to_invoice
 from apps.payments.models import PaymentTransaction
@@ -71,7 +73,13 @@ def _doctor_display_name(user):
 class DischargeSummaryViewSet(viewsets.ModelViewSet):
     queryset = (
         DischargeSummary.objects.all()
-        .select_related("admission", "admission__patient", "admission__assigned_doctor", "admission__scheme")
+        .select_related(
+            "admission",
+            "admission__patient",
+            "admission__patient__guardian",
+            "admission__assigned_doctor",
+            "admission__scheme",
+        )
         .prefetch_related("medication_rows", "investigation_rows", "surgery_rows")
         .order_by("-updated_at", "-created_at")
     )
@@ -88,6 +96,11 @@ class DischargeSummaryViewSet(viewsets.ModelViewSet):
         admission_id = self.request.query_params.get("admission_id")
         if admission_id:
             filtered_qs = filtered_qs.filter(admission_id=admission_id)
+
+        is_draft_param = self.request.query_params.get("is_draft")
+        if is_draft_param is not None and str(is_draft_param).strip() != "":
+            filtered_qs = filtered_qs.filter(is_draft=_parse_bool(is_draft_param))
+
         return filtered_qs.order_by("-updated_at", "-created_at")
 
     def _finalize_admission(self, admission, hospital_id, summary=None):
@@ -96,7 +109,13 @@ class DischargeSummaryViewSet(viewsets.ModelViewSet):
         from django.utils import timezone
 
         from apps.beds.models import Bed
-        from apps.billing.models import BillingInvoice, InvoiceItem, InvoiceNumberSequence
+        from apps.billing.models import (
+            BillingInvoice,
+            IPDFinalBill,
+            IPDFinalBillItem,
+            InvoiceItem,
+            InvoiceNumberSequence,
+        )
 
         skip_room_invoice = summary and summary.discharge_type in (
             DischargeSummary.DischargeType.DEATH,
@@ -173,12 +192,142 @@ class DischargeSummaryViewSet(viewsets.ModelViewSet):
                 admission.discharged_at = timezone.now()
                 admission.save(update_fields=["status", "discharged_at"])
 
-            # 3. Release occupied bed immediately after discharge (vacant/available).
+            # 3. Auto-clear pharmacy credit invoices linked to this admission
+            from apps.pharmacy.models import PharmacyInvoice as PharmInvoice
+
+            PharmInvoice.objects.filter(
+                ipd_admission=admission,
+                payment_method="credit",
+                status=PharmInvoice.Status.FINALIZED,
+                paid_amount__lt=F("grand_total"),
+            ).update(paid_amount=F("grand_total"))
+
+            # 4. Release occupied bed immediately after discharge (vacant/available).
             if admission.bed_code:
                 Bed.objects.filter(
                     bed_code=admission.bed_code,
                     hospital_id=hospital_id,
                 ).update(status=Bed.Status.AVAILABLE)
+
+            # 5. Populate/refresh the editable final bill record.
+            items_qs = (
+                InvoiceItem.objects.filter(
+                    invoice__ipd_admission=admission,
+                    invoice__status=BillingInvoice.Status.FINALIZED,
+                )
+                .exclude(invoice__invoice_no__startswith="IPDADV-")
+                .select_related("invoice")
+            )
+
+            positive_items = items_qs.filter(line_total__gte=0)
+            gross = positive_items.aggregate(total=Sum("line_total"))["total"] or Decimal("0.00")
+            discount_total = items_qs.filter(line_total__lt=0).aggregate(total=Sum("line_total"))["total"] or Decimal("0.00")
+            discount = abs(discount_total)
+            amount_paid = (
+                BillingInvoice.objects.filter(
+                    ipd_admission=admission,
+                    status=BillingInvoice.Status.FINALIZED,
+                ).aggregate(total=Sum("amount_paid"))["total"]
+                or Decimal("0.00")
+            )
+            net = max(gross - discount, Decimal("0.00"))
+            due = max(net - amount_paid, Decimal("0.00"))
+
+            patient = admission.patient
+            patient_name = " ".join(
+                part for part in [patient.first_name, patient.middle_name, patient.last_name] if part
+            ).strip()
+            guardian_name = getattr(getattr(patient, "guardian", None), "name", "") or ""
+            address = getattr(patient, "address", None)
+            address_parts = []
+            if address is not None:
+                address_parts = [
+                    address.line1,
+                    address.line2,
+                    address.city,
+                    address.state,
+                    address.country,
+                    address.postal_code,
+                ]
+            patient_address = ", ".join(part.strip() for part in address_parts if part and part.strip())
+            consultant_name = summary.treating_consultant.strip() if summary and summary.treating_consultant else _doctor_display_name(admission.assigned_doctor)
+            admission_dt = timezone.make_aware(datetime.combine(admission.admission_date, time.min))
+            if summary and summary.discharge_date:
+                discharge_time = summary.discharge_time or time.min
+                discharge_dt = timezone.make_aware(datetime.combine(summary.discharge_date, discharge_time))
+            else:
+                discharge_dt = admission.discharged_at or timezone.now()
+
+            final_bill, _ = IPDFinalBill.objects.get_or_create(
+                admission=admission,
+                defaults={
+                    "hospital_id": hospital_id,
+                    "patient": patient,
+                    "bill_no": next_ipd_final_bill_number(admission),
+                    "patient_name": patient_name,
+                    "guardian_name": guardian_name,
+                    "patient_phone": patient.phone or "",
+                    "patient_address": patient_address,
+                    "consultant_name": consultant_name,
+                    "room_bed": admission.bed_code or "",
+                    "scheme_name": getattr(getattr(admission, "scheme", None), "name", "") or "",
+                    "admission_date": admission_dt,
+                },
+            )
+            final_bill_bill_no_was_missing = not (final_bill.bill_no or "").strip()
+            if not (final_bill.bill_no or "").strip():
+                final_bill.bill_no = next_ipd_final_bill_number(admission)
+            final_bill.patient = patient
+            final_bill.patient_name = patient_name
+            final_bill.guardian_name = guardian_name
+            final_bill.patient_phone = patient.phone or ""
+            final_bill.patient_address = patient_address
+            final_bill.consultant_name = consultant_name
+            final_bill.room_bed = admission.bed_code or ""
+            final_bill.scheme_name = getattr(getattr(admission, "scheme", None), "name", "") or ""
+            final_bill.admission_date = admission_dt
+            final_bill.discharge_date = discharge_dt
+            final_bill.gross_amount = gross
+            final_bill.discount_amount = discount
+            final_bill.net_amount = net
+            final_bill.amount_paid = amount_paid
+            final_bill.due_amount = due
+            final_bill.notes = summary.summary_notes if summary else ""
+            final_bill.save(
+                update_fields=[
+                    "patient",
+                    "patient_name",
+                    "guardian_name",
+                    "patient_phone",
+                    "patient_address",
+                    "consultant_name",
+                    "room_bed",
+                    "scheme_name",
+                    "admission_date",
+                    "discharge_date",
+                    "gross_amount",
+                    "discount_amount",
+                    "net_amount",
+                    "amount_paid",
+                    "due_amount",
+                    "notes",
+                    "updated_at",
+                ] + (["bill_no"] if final_bill_bill_no_was_missing else [])
+            )
+            final_bill.items.all().delete()
+            IPDFinalBillItem.objects.bulk_create(
+                [
+                    IPDFinalBillItem(
+                        final_bill=final_bill,
+                        description=item.description,
+                        category=item.category or "",
+                        quantity=item.quantity,
+                        rate=item.unit_price,
+                        amount=item.line_total,
+                    )
+                    for item in positive_items
+                ]
+            )
 
     def create(self, request, *args, **kwargs):
         admission_id = request.data.get("admission")
@@ -395,7 +544,10 @@ class DischargeSummaryViewSet(viewsets.ModelViewSet):
 
         summary = (
             DischargeSummary.objects.select_related(
-                "admission", "admission__patient", "admission__assigned_doctor"
+                "admission",
+                "admission__patient",
+                "admission__patient__guardian",
+                "admission__assigned_doctor",
             )
             .prefetch_related("medication_rows", "investigation_rows", "surgery_rows")
             .get(pk=summary.pk)

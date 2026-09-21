@@ -60,7 +60,7 @@
       {% if patient_phone %}
       <div><div class="label">Mobile</div><div class="val">{{ patient_phone }}</div></div>
       {% endif %}
-      <div><div class="label">Date</div><div class="val">{{ paid_at|date:"d/m/Y H:i" }}</div></div>
+      <div><div class="label">Date</div><div class="val">{{ paid_at|date:"d/m/Y h:i A" }}</div></div>
       <div><div class="label">Payment Mode</div><div class="val">{{ payment_mode }}</div></div>
     </div>
     <table>

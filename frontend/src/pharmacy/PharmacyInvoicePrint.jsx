@@ -309,6 +309,9 @@ function b2cPatientHeaderLines(inv) {
   const name = patientDisplayName(pd)
   if (name) lines.push({ key: 'name', label: 'Patient Name', value: name })
 
+  lines.push({ key: 'age', label: 'Age', value: formatPatientAge(pd) || '\u00a0' })
+  lines.push({ key: 'gender', label: 'Gender', value: formatPatientGender(pd) || '\u00a0' })
+
   const phone = String(pd.phone || '').trim()
   if (phone) lines.push({ key: 'phone', label: 'Patient Phone', value: phone })
 
@@ -321,12 +324,9 @@ function b2cPatientHeaderLines(inv) {
 
   if (isWalkInRetailInvoice(inv)) {
     const doc = String(inv.billing_doctor_name || '').trim()
-    if (doc) lines.push({ key: 'doc', label: 'Doctor Name', value: doc })
     const hosp = String(inv.billing_hospital_name || '').trim()
-    if (hosp) lines.push({ key: 'hosp', label: 'Hospital Name', value: hosp })
-  } else {
-    const doctor = invoiceDoctorDisplayName(inv)
-    if (doctor && doctor !== '—') lines.push({ key: 'doctor', label: 'Dr. Name', value: doctor })
+    lines.push({ key: 'doc', label: 'Doctor Name', value: doc || '\u00a0' })
+    lines.push({ key: 'hosp', label: 'Hospital Name', value: hosp || '\u00a0' })
   }
   return lines
 }
@@ -379,6 +379,30 @@ function extractNotesAdviceFromRemarks(remarks) {
   const idx = lower.indexOf(key)
   if (idx < 0) return ''
   return raw.slice(idx + key.length).trim()
+}
+
+function formatPatientGender(pd) {
+  const g = String(pd?.gender || '').trim().toLowerCase()
+  if (g === 'male') return 'Male'
+  if (g === 'female') return 'Female'
+  if (g === 'other') return 'Other'
+  return ''
+}
+
+function formatPatientAge(pd) {
+  if (!pd || typeof pd !== 'object') return ''
+  const rawUnit = String(pd.age_unit || 'years').trim().toLowerCase()
+  const unit =
+    rawUnit === 'month' || rawUnit === 'months'
+      ? 'Months'
+      : rawUnit === 'day' || rawUnit === 'days'
+        ? 'Days'
+        : 'Years'
+  const value = pd.age_value != null && pd.age_value !== '' ? pd.age_value : pd.age
+  if (value == null || value === '') return ''
+  const n = Number(value)
+  if (!Number.isFinite(n)) return ''
+  return `${n} ${unit}`
 }
 
 /** Patient name from API / billing (PatientSerializer includes middle_name). */
@@ -553,6 +577,7 @@ function InvoiceFooterPreview({
   totalDiscountPercent,
   cgst,
   sgst,
+  roundOff,
   paidAmount,
   dueAmount,
   grandTotal,
@@ -657,6 +682,12 @@ function InvoiceFooterPreview({
               <span>SGST</span><span>{formatMoney(sgst)}</span>
             </div>
           </>
+        ) : null}
+        {roundOff ? (
+          <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px', borderBottom: B_ORDER }}>
+            <span>ROUND OFF</span>
+            <span>{roundOff > 0 ? '+' : '-'}{formatMoney(Math.abs(roundOff))}</span>
+          </div>
         ) : null}
         <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 8px', borderBottom: B_ORDER }}>
           <span>PAID</span><span>{formatMoney(paidAmount)}</span>
@@ -784,8 +815,10 @@ function buildInvoiceHtml({ invoice, outlet }) {
   const sgst = Number(invoice.sgst || 0)
   const tax = cgst + sgst
   const grandTotal = Number(invoice.grand_total || 0)
+  const roundOff = Math.round((Number(invoice.round_off) || 0) * 100) / 100
   const grossBeforeBillDiscount = showGst ? subtotal + tax : subtotal
-  const totalDiscount = Math.max(0, Math.round((grossBeforeBillDiscount - grandTotal) * 100) / 100)
+  // grand_total already carries the round-off, so add it back to keep the discount honest.
+  const totalDiscount = Math.max(0, Math.round((grossBeforeBillDiscount - grandTotal + roundOff) * 100) / 100)
   const totalDiscountPercent =
     grossBeforeBillDiscount > 0
       ? Math.max(0, Math.round((totalDiscount / grossBeforeBillDiscount) * 100 * 100) / 100)
@@ -890,7 +923,7 @@ function buildInvoiceHtml({ invoice, outlet }) {
   const partyGstHtml = escapeHtml(partyGst)
   const partyDlHtml = escapeHtml(partyDl)
   const doctorNameHtml = escapeHtml(invoiceDoctorDisplayName(invoice))
-  const invoiceDate = safeFormat(invoice.created_at || new Date(), 'dd-MM-yyyy HH:mm')
+  const invoiceDate = safeFormat(invoice.created_at || new Date(), 'dd/MM/yyyy HH:mm')
   const notesAdviceText = extractNotesAdviceFromRemarks(invoice.remarks)
   const notesAdviceHtml = notesAdviceText ? escapeHtml(notesAdviceText).replace(/\n/g, '<br/>') : ''
 
@@ -1007,6 +1040,13 @@ function buildInvoiceHtml({ invoice, outlet }) {
           <span>ADD. DIS. (${totalDiscountPercent.toFixed(2)}%)</span><span>${formatMoney(totalDiscount)}</span>
         </div>
         ${gstTotalRows}
+        ${
+          roundOff !== 0
+            ? `<div style="display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #000">
+          <span>ROUND OFF</span><span>${roundOff > 0 ? '+' : '-'}${formatMoney(Math.abs(roundOff))}</span>
+        </div>`
+            : ''
+        }
         <div style="display:flex;justify-content:space-between;padding:4px 8px;border-bottom:1px solid #000">
           <span>PAID</span><span>${formatMoney(paidAmount)}</span>
         </div>
@@ -1139,8 +1179,10 @@ const InvoicePreviewDocument = React.memo(
   const sgst = Number(invoice.sgst || 0)
   const tax = cgst + sgst
   const grandTotal = Number(invoice.grand_total || 0)
+  const roundOff = Math.round((Number(invoice.round_off) || 0) * 100) / 100
   const grossBeforeBillDiscount = showGst ? subtotal + tax : subtotal
-  const totalDiscount = Math.max(0, Math.round((grossBeforeBillDiscount - grandTotal) * 100) / 100)
+  // grand_total already carries the round-off, so add it back to keep the discount honest.
+  const totalDiscount = Math.max(0, Math.round((grossBeforeBillDiscount - grandTotal + roundOff) * 100) / 100)
   const totalDiscountPercent =
     grossBeforeBillDiscount > 0
       ? Math.max(0, Math.round((totalDiscount / grossBeforeBillDiscount) * 100 * 100) / 100)
@@ -1258,7 +1300,7 @@ const InvoicePreviewDocument = React.memo(
                 <strong>Invoice No. : {invoice.invoice_no}</strong>
               </EditableBlock>
               <EditableBlock as="span">
-                <strong>Date: {safeFormat(invoice.created_at || new Date(), 'dd-MM-yyyy HH:mm')}</strong>
+                <strong>Date: {safeFormat(invoice.created_at || new Date(), 'dd/MM/yyyy HH:mm')}</strong>
               </EditableBlock>
             </div>
           </div>
@@ -1390,6 +1432,7 @@ const InvoicePreviewDocument = React.memo(
           totalDiscountPercent={totalDiscountPercent}
           cgst={cgst}
           sgst={sgst}
+          roundOff={roundOff}
           paidAmount={paidAmount}
           dueAmount={dueAmount}
           grandTotal={grandTotal}
@@ -1408,6 +1451,8 @@ export default function PharmacyInvoicePrint({
   onClose,
   variant = 'original',
   onPrintCopySaved,
+  embedded = false,
+  autoPrint = false,
 }) {
   const [printing, setPrinting] = useState(false)
   const [persisting, setPersisting] = useState(false)
@@ -1491,20 +1536,53 @@ export default function PharmacyInvoicePrint({
     }
   }, [invoice, printOutlet, printing, persistPrintCopyIfChanged])
 
+  // TPA pack printing mounts this off-screen just to fire the print — no operator input.
+  const doPrintRef = useRef(doPrint)
+  useEffect(() => { doPrintRef.current = doPrint }, [doPrint])
+  const autoPrintStartedRef = useRef(false)
+  useEffect(() => {
+    if (!autoPrint || embedded || !invoice?.id) return undefined
+    if (autoPrintStartedRef.current) return undefined
+    autoPrintStartedRef.current = true
+    const timer = window.setTimeout(async () => {
+      try {
+        await doPrintRef.current()
+      } finally {
+        onClose?.()
+      }
+    }, 400)
+    return () => window.clearTimeout(timer)
+  }, [autoPrint, embedded, invoice?.id, onClose])
+
   if (!invoice) return null
 
   const variantLabel = isPrintedVariant ? 'Printed copy' : 'Original bill'
 
   return (
     <div
-      style={{
-        position: 'fixed',
-        inset: 0,
-        background: 'white',
-        zIndex: 9999,
-        overflowY: 'auto',
-        padding: '20px',
-      }}
+      style={embedded
+        ? { background: 'white', overflow: 'visible', padding: '8px 0 24px' }
+        : autoPrint
+          // Unattended (TPA pack) printing: stay off-screen — the bill is cloned into a
+          // print iframe, so it must render but must not cover the pack screen.
+          ? {
+              position: 'fixed',
+              top: 0,
+              left: '-10000px',
+              width: '230mm',
+              background: 'white',
+              zIndex: -1,
+              opacity: 0,
+              pointerEvents: 'none',
+            }
+          : {
+              position: 'fixed',
+              inset: 0,
+              background: 'white',
+              zIndex: 9999,
+              overflowY: 'auto',
+              padding: '20px',
+            }}
     >
       <style data-preview-only>{PREVIEW_EDIT_STYLES}</style>
       <p style={{ textAlign: 'center', marginBottom: '8px', fontSize: '11px', fontWeight: 700, color: '#475569' }}>
@@ -1527,14 +1605,16 @@ export default function PharmacyInvoicePrint({
         >
           {printing ? 'Printing…' : '🖨 Print Invoice'}
         </button>
-        <button
-          type="button"
-          onClick={handleClose}
-          disabled={printing || persisting}
-          style={{ background: '#1e40af', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' }}
-        >
-          {persisting ? 'Saving…' : '✕ Close Preview'}
-        </button>
+        {!embedded && (
+          <button
+            type="button"
+            onClick={handleClose}
+            disabled={printing || persisting}
+            style={{ background: '#1e40af', color: 'white', border: 'none', padding: '10px 24px', borderRadius: '6px', cursor: 'pointer', fontSize: '14px' }}
+          >
+            {persisting ? 'Saving…' : '✕ Close Preview'}
+          </button>
+        )}
       </div>
     </div>
   )

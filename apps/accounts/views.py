@@ -2,6 +2,7 @@ from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
 from django.conf import settings
 from django.core.mail import send_mail
+from django.utils import timezone
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_decode, urlsafe_base64_encode
 from rest_framework import permissions, serializers, status, viewsets
@@ -64,8 +65,65 @@ class TokenObtainPairWithResponse(TokenObtainPairView):
                 data["first_name"] = user.first_name
                 data["last_name"] = user.last_name
                 data["is_superuser"] = user.is_superuser
+                data["is_staff"] = bool(user.is_staff)
                 data.update(auth_session_payload_for_user(user))
-                if intended_portal and intended_portal not in data.get("allowed_portals", []):
+
+                from apps.hr.employee_portal import resolve_employee_for_user
+
+                employee = resolve_employee_for_user(user)
+                data["has_employee_profile"] = employee is not None
+                data["employee_id"] = str(employee.id) if employee else None
+                data["must_change_password"] = bool(getattr(user, "must_change_password", False))
+                if employee:
+                    from apps.hr.portal_provisioning import portal_login_allowed
+
+                    data["employee_status"] = employee.status
+                    data["employee_code"] = employee.employee_id
+                    data["portal_access_allowed"] = portal_login_allowed(user, employee)
+                else:
+                    data["employee_status"] = None
+                    data["employee_code"] = None
+                    data["portal_access_allowed"] = False
+
+                if intended_portal == "employee":
+                    if not employee:
+                        return Response(
+                            {
+                                "success": False,
+                                "errors": {
+                                    "detail": [
+                                        "No employee profile linked to this account. "
+                                        "Use the email on your HR record."
+                                    ],
+                                },
+                            },
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                    if data.get("portal_access_allowed") is False:
+                        return Response(
+                            {
+                                "success": False,
+                                "errors": {
+                                    "detail": [
+                                        "Employee portal access is disabled. "
+                                        "Contact HR if you believe this is an error."
+                                    ],
+                                },
+                            },
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                elif intended_portal == "hr":
+                    if not (user.is_staff or user.is_superuser):
+                        return Response(
+                            {
+                                "success": False,
+                                "errors": {
+                                    "detail": ["HR access requires an HR staff account."],
+                                },
+                            },
+                            status=status.HTTP_403_FORBIDDEN,
+                        )
+                elif intended_portal and intended_portal not in data.get("allowed_portals", []):
                     return Response(
                         {
                             "success": False,
@@ -162,8 +220,24 @@ class PasswordChangeView(APIView):
     def post(self, request, *args, **kwargs):
         serializer = PasswordChangeSerializer(data=request.data, context={"request": request})
         serializer.is_valid(raise_exception=True)
-        request.user.set_password(serializer.validated_data["new_password"])
-        request.user.save(update_fields=["password"])
+        user = request.user
+        user.set_password(serializer.validated_data["new_password"])
+        user.must_change_password = False
+        user.save(update_fields=["password", "must_change_password"])
+
+        from apps.hr.employee_portal import resolve_employee_for_user
+        from apps.hr.onboarding_documents import log_document_audit
+
+        employee = resolve_employee_for_user(user)
+        if employee:
+            log_document_audit(
+                employee=employee,
+                action='password_changed',
+                performed_by=user,
+                notes='Employee changed portal password.',
+                metadata={'changed_at': timezone.now().isoformat()},
+            )
+
         return success_response(message="Password changed successfully.")
 
 
@@ -189,7 +263,9 @@ class PasswordResetRequestView(APIView):
     permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
-        email = request.data.get("email")
+        from apps.shared.email_normalization import normalize_email_address
+
+        email = normalize_email_address(request.data.get("email"))
         if not email:
             return Response(
                 {"success": False, "errors": {"email": ["This field is required."]}},

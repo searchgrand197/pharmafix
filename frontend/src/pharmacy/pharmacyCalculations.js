@@ -212,6 +212,17 @@ export function computeSaleGstTotals(
 }
 
 /**
+ * Retail bill round-off: settle in whole rupees, nearest rupee (0.50 rounds up).
+ * Mirrors apps.pharmacy.calculations.invoice_round_off.
+ * @returns {{ payable: number, roundOff: number }} roundOff = payable − exact (the ± shown on the bill)
+ */
+export function computeInvoiceRoundOff(amount) {
+  const exact = Math.round((Number(amount) || 0) * 100) / 100
+  const payable = Math.round(exact)
+  return { payable, roundOff: Math.round((payable - exact) * 100) / 100 }
+}
+
+/**
  * @param {number} baseQty - stock in base units (e.g. tablets)
  * @param {Record<string, number>} conversions - e.g. { strip: 10, box: 100 }
  * @param {string} baseLabel - e.g. "tablet"

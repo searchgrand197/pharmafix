@@ -1,0 +1,275 @@
+{
+  "format": "curevice.lab_templates",
+  "version": 2,
+  "exported_at": "2026-09-02T00:00:00+00:00",
+  "source_hospital_name": "SUNITA report pack (ESR, Malaria, LFT, CRP, Typhi Dot)",
+  "categories": ["Haematology", "Biochemistry", "Serology"],
+  "test_count": 5,
+  "tests": [
+    {
+      "name": "Erythrocyte Sedimentation Rate (ESR)",
+      "code": "ESR",
+      "unit": "",
+      "reference_range": "",
+      "price": "100.00",
+      "is_group_test": false,
+      "procedure": "",
+      "is_active": true,
+      "sample_type": "WHOLE BLOOD EDTA",
+      "method": "ESR estimation by Westergren method",
+      "interpretation": "Note:\n1. C-Reactive Protein (CRP) is the recommended test in acute inflammatory conditions.\n2. Test conducted on EDTA whole blood at 37°C.\n3. ESR readings are auto-corrected with respect to Hematocrit (PCV) values.",
+      "department_label": "HEMATOLOGY",
+      "category_name": "Haematology",
+      "parameters": [
+        {
+          "name": "Erythrocyte Sedimentation Rate (ESR)",
+          "code": "ESR",
+          "unit": "mm/hr",
+          "reference_range": "Women under age 50: under 20; Men under age 50: under 15; Women over age 50: under 30; Men over age 50: under 20; Newborns: under 2; Children before puberty: 3-13",
+          "ref_low": "0",
+          "ref_high": "30",
+          "method": "Westergren",
+          "section_title": "",
+          "sort_order": 1,
+          "result_type": "numeric"
+        }
+      ]
+    },
+    {
+      "name": "Malaria Parasite / Blood Parasite Identification",
+      "code": "MP",
+      "unit": "",
+      "reference_range": "",
+      "price": "150.00",
+      "is_group_test": false,
+      "procedure": "",
+      "is_active": true,
+      "sample_type": "WHOLE BLOOD EDTA",
+      "method": "Microscopic examination",
+      "interpretation": "",
+      "department_label": "HEMATOLOGY",
+      "category_name": "Haematology",
+      "parameters": [
+        {
+          "name": "Malaria Parasite / Blood Parasite Identification",
+          "code": "MP",
+          "unit": "",
+          "reference_range": "Negative",
+          "ref_low": null,
+          "ref_high": null,
+          "method": "Microscopic examination",
+          "section_title": "",
+          "sort_order": 1,
+          "result_type": "qualitative"
+        }
+      ]
+    },
+    {
+      "name": "LFT (Liver Function Test)",
+      "code": "LFT",
+      "unit": "",
+      "reference_range": "",
+      "price": "450.00",
+      "is_group_test": true,
+      "procedure": "",
+      "is_active": true,
+      "sample_type": "SERUM",
+      "method": "Automated Spectrophotometry based Assay",
+      "interpretation": "Note:\n1. In an asymptomatic patient, Non alcoholic fatty liver disease (NAFLD) is the most common cause of increased AST, ALT levels. NAFLD is considered as hepatic manifestation of metabolic syndrome.\n2. In most type of liver disease, ALT activity is higher than that of AST; exception may be seen in Alcoholic Hepatitis, Hepatic Cirrhosis, and Liver neoplasia. In a patient with Chronic liver disease, AST:ALT ratio>1 is highly suggestive of advanced liver fibrosis.\n3. In known cases of Chronic Liver disease due to Viral Hepatitis B & C, Alcoholic liver disease or NAFLD, Enhanced liver fibrosis (ELF) test may be used to evaluate liver fibrosis.\n4. In a patient with Chronic Liver disease, AFP and Des-gamma carboxyprothrombin (DCP)/PIVKA II can be used to assess risk for development of Hepatocellular Carcinoma.",
+      "department_label": "BIOCHEMISTRY",
+      "category_name": "Biochemistry",
+      "parameters": [
+        {
+          "name": "Serum Bilirubin (Total)",
+          "code": "TBIL",
+          "unit": "mg/dL",
+          "reference_range": "0.2-1.2",
+          "ref_low": "0.2",
+          "ref_high": "1.2",
+          "method": "DIAZO METHOD",
+          "section_title": "",
+          "sort_order": 1,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Serum Bilirubin (Direct)",
+          "code": "DBIL",
+          "unit": "mg/dL",
+          "reference_range": "0.0-0.2",
+          "ref_low": "0.0",
+          "ref_high": "0.2",
+          "method": "DIAZO METHOD",
+          "section_title": "",
+          "sort_order": 2,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Serum Bilirubin (Indirect)",
+          "code": "IBIL",
+          "unit": "mg/dL",
+          "reference_range": "0-0.8",
+          "ref_low": "0",
+          "ref_high": "0.8",
+          "method": "Calculated",
+          "section_title": "",
+          "sort_order": 3,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Aspartate Transaminase (AST/SGOT)",
+          "code": "SGOT",
+          "unit": "U/L",
+          "reference_range": "0-50",
+          "ref_low": "0",
+          "ref_high": "50",
+          "method": "IFCC METHOD",
+          "section_title": "",
+          "sort_order": 4,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Alanine Transaminase (ALT/SGPT)",
+          "code": "SGPT",
+          "unit": "U/L",
+          "reference_range": "0-45",
+          "ref_low": "0",
+          "ref_high": "45",
+          "method": "IFCC METHOD",
+          "section_title": "",
+          "sort_order": 5,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Alkaline Phosphatase",
+          "code": "ALP",
+          "unit": "mg/dL",
+          "reference_range": "30-130",
+          "ref_low": "30",
+          "ref_high": "130",
+          "method": "TRIS CARBONATE BUFFER, KINETIC",
+          "section_title": "",
+          "sort_order": 6,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Total Protein",
+          "code": "TP",
+          "unit": "g/dL",
+          "reference_range": "6.4-8.2",
+          "ref_low": "6.4",
+          "ref_high": "8.2",
+          "method": "BIURET",
+          "section_title": "",
+          "sort_order": 7,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Albumin",
+          "code": "ALB",
+          "unit": "g/dL",
+          "reference_range": "3.4-5",
+          "ref_low": "3.4",
+          "ref_high": "5",
+          "method": "BROMOCRESOL GREEN",
+          "section_title": "",
+          "sort_order": 8,
+          "result_type": "numeric"
+        },
+        {
+          "name": "Globulin",
+          "code": "GLOB",
+          "unit": "g/dL",
+          "reference_range": "1.9-3.9",
+          "ref_low": "1.9",
+          "ref_high": "3.9",
+          "method": "BROMOCRESOL GREEN",
+          "section_title": "",
+          "sort_order": 9,
+          "result_type": "numeric"
+        },
+        {
+          "name": "A/G Ratio",
+          "code": "AGRATIO",
+          "unit": "-",
+          "reference_range": "1.0-2.0",
+          "ref_low": "1.0",
+          "ref_high": "2.0",
+          "method": "KINETIC",
+          "section_title": "",
+          "sort_order": 10,
+          "result_type": "numeric"
+        }
+      ]
+    },
+    {
+      "name": "C-Reactive Protein (CRP)",
+      "code": "CRP",
+      "unit": "",
+      "reference_range": "",
+      "price": "250.00",
+      "is_group_test": false,
+      "procedure": "",
+      "is_active": true,
+      "sample_type": "SERUM",
+      "method": "Automated Nephelometric immunoassay based assay",
+      "interpretation": "CRP is an acute phase reactant which is used in inflammatory disorders for monitoring course and effect of therapy. It is most useful as an indicator of activity in rheumatoid arthritis, Rheumatic fever, tissue injury or necrosis and infections. As compared to ESR, CRP shows an earlier rise in inflammatory disorders which begins in 4-6 hrs, the intensity of the rise being higher than ESR and the recovery being earlier than ESR. Unlike ESR, CRP levels are not influenced by hematologic conditions like Anemia, Polycythemia etc.",
+      "department_label": "BIOCHEMISTRY",
+      "category_name": "Biochemistry",
+      "parameters": [
+        {
+          "name": "C-Reactive Protein (CRP)",
+          "code": "CRP",
+          "unit": "mg/L",
+          "reference_range": "< 6.0",
+          "ref_low": "0",
+          "ref_high": "6.0",
+          "method": "Nephelometric (Quantitative)",
+          "section_title": "",
+          "sort_order": 1,
+          "result_type": "numeric"
+        }
+      ]
+    },
+    {
+      "name": "Typhi Dot / Salmonella Typhi IgM & IgG",
+      "code": "TYPHIDOT",
+      "unit": "",
+      "reference_range": "",
+      "price": "300.00",
+      "is_group_test": true,
+      "procedure": "",
+      "is_active": true,
+      "sample_type": "SERUM",
+      "method": "Immunochromatography",
+      "interpretation": "RESULTS CLINICAL INTERPRETATION:\nIgM positive; IgG negative — Acute Typhoid Fever\nIgM and IgG positive — Acute Typhoid Fever (in the middle stage of infection)\nIgM negative; IgG positive — Implications for the presence of IgG antibodies may be due to: 1. Current Infection 2. Previous Infection 3. Relapse or reinfection\nIgM and IgG negative — Probably not typhoid",
+      "department_label": "SEROLOGY",
+      "category_name": "Serology",
+      "parameters": [
+        {
+          "name": "Typhi Dot / Salmonella Typhi IgM",
+          "code": "TYPHI-IGM",
+          "unit": "",
+          "reference_range": "Negative",
+          "ref_low": null,
+          "ref_high": null,
+          "method": "Immunochromatography",
+          "section_title": "",
+          "sort_order": 1,
+          "result_type": "qualitative"
+        },
+        {
+          "name": "Typhi Dot / Salmonella Typhi IgG",
+          "code": "TYPHI-IGG",
+          "unit": "",
+          "reference_range": "Negative",
+          "ref_low": null,
+          "ref_high": null,
+          "method": "Immunochromatography",
+          "section_title": "",
+          "sort_order": 2,
+          "result_type": "qualitative"
+        }
+      ]
+    }
+  ]
+}

@@ -53,14 +53,30 @@ sudo certbot --nginx -d yourdomain.com -d www.yourdomain.com
 
 ## 5) Update deployment after new code push
 
+**Safe update order (required):** backup DB → pull code only → migrate → restart.
+
+Never run `git reset --hard` on a live Hostinger/VPS checkout: it can overwrite or desync `db.sqlite3` (+ `-wal`/`-shm`) and corrupt client data. SQLite DB files are gitignored and must not be committed.
+
 ```bash
 cd /srv/curevice
+# 1) Backup live SQLite (skip if using Postgres)
+sudo -u curevice mkdir -p backups
+STAMP=$(date +%Y%m%d-%H%M%S)
+sudo -u curevice bash -lc 'mkdir -p backups/db-'"$STAMP"' && cp -a db.sqlite3* backups/db-'"$STAMP"'/ 2>/dev/null || true'
+# 2) Code only
 sudo -u curevice git pull --ff-only origin feature/nvn
 sudo -u curevice /srv/curevice/.venv/bin/pip install -r requirements.txt
+# 3) Migrate
 sudo -u curevice /srv/curevice/.venv/bin/python manage.py migrate --noinput
 sudo -u curevice /srv/curevice/.venv/bin/python manage.py collectstatic --noinput
+# 4) Restart
 sudo systemctl restart curevice
 ```
+
+**Production DB tips**
+
+- Prefer `POSTGRES_DB=...` (and related `POSTGRES_*`) in `.env` for multi-hospital / biometric hosts.
+- Or keep SQLite **outside** the git tree: `SQLITE_PATH=/var/lib/curevice/db.sqlite3` so pulls cannot touch it.
 
 If frontend changed:
 

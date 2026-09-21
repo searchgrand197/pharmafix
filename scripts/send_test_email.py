@@ -1,4 +1,4 @@
-"""
+﻿"""
 Send a one-off SMTP test email using Django settings.
 
 Usage:

@@ -8,6 +8,9 @@ from typing import Any
 
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
+from apps.accounts.models import User
+from apps.shared.email_normalization import normalize_email_address
+
 
 class HospitalTenantTokenObtainPairSerializer(TokenObtainPairSerializer):
     """Adds ``hospital_id`` / ``hospital_name`` to login body and JWT claims."""
@@ -22,8 +25,12 @@ class HospitalTenantTokenObtainPairSerializer(TokenObtainPairSerializer):
     def validate(self, attrs: dict) -> dict:
         username_field = getattr(self, "username_field", "email")
         raw_identifier = attrs.get(username_field)
-        if isinstance(raw_identifier, str):
-            attrs[username_field] = raw_identifier.strip().lower()
+        if isinstance(raw_identifier, str) and raw_identifier:
+            normalized = normalize_email_address(raw_identifier)
+            attrs[username_field] = normalized
+            user = User.objects.filter(email__iexact=normalized).first()
+            if user is not None:
+                attrs[username_field] = user.email
 
         data = super().validate(attrs)
         user = self.user
@@ -43,4 +50,3 @@ class HospitalTenantTokenObtainPairSerializer(TokenObtainPairSerializer):
         else:
             data["hospital_name"] = None
         return data
-

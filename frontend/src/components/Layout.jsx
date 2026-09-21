@@ -1,5 +1,4 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
 import Box from '@mui/material/Box'
 import AppBar from '@mui/material/AppBar'
 import Toolbar from '@mui/material/Toolbar'
@@ -18,8 +17,6 @@ const GRADIENT_MAP = {
 }
 
 export default function Layout({ title, subtitle, color = 'blue', children, tabs, activeTab, onTab, headerExtra, noScroll }) {
-  const nav = useNavigate()
-
   function logout() {
     useAuthStore.getState().logoutSilent()
     window.location.replace('/login')

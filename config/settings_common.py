@@ -12,7 +12,38 @@ env = environ.Env(
 
 env_file = BASE_DIR / ".env"
 if env_file.exists():
-    env.read_env(str(env_file))
+    import io as _io
+    import re as _re_env
+
+    def _normalize_env_text(text: str) -> str:
+        """
+        Rewrite multi-line Python list values in a .env file so django-environ
+        can parse them without "Invalid line" warnings.
+
+        Example — converts:
+            CORS_ALLOWED_ORIGINS = [
+                "https://a.com",
+                "https://b.com"
+            ]
+        to:
+            CORS_ALLOWED_ORIGINS=https://a.com,https://b.com
+        """
+        def _flatten(m: "_re_env.Match") -> str:
+            key = m.group(1).strip()
+            body = m.group(2)
+            # Extract every quoted string from the bracket body
+            values = _re_env.findall(r'["\']([^"\']+)["\']', body)
+            return f"{key}={','.join(values)}"
+
+        return _re_env.sub(
+            r'^([\w]+)\s*=\s*\[([^\]]*)\]',
+            _flatten,
+            text,
+            flags=_re_env.MULTILINE | _re_env.DOTALL,
+        )
+
+    _env_raw = env_file.read_text(encoding="utf-8")
+    env.read_env(_io.StringIO(_normalize_env_text(_env_raw)))
 
 
 # SECURITY
@@ -48,6 +79,7 @@ INSTALLED_APPS = [
     "apps.ipd",
     "apps.billing",
     "apps.payments",
+    "apps.expenses",
     "apps.auditlogs",
     "apps.doctors",
     "apps.staff",
@@ -72,6 +104,7 @@ INSTALLED_APPS = [
     "apps.discharge",
     "apps.treatment",
     "apps.opd_templates",
+    "apps.hr",
 ]
 
 MIDDLEWARE = [
@@ -123,10 +156,16 @@ if POSTGRES_DB:
         }
     }
 else:
+    # Prefer SQLITE_PATH outside the git tree so pulls/resets cannot touch client data.
+    _sqlite_name = env("SQLITE_PATH", default="") or str(BASE_DIR / "db.sqlite3")
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
+            "NAME": _sqlite_name,
+            "OPTIONS": {
+                # Biometric device polling + HR writes contend on SQLite without this.
+                "timeout": 30,
+            },
         }
     }
 
@@ -154,11 +193,31 @@ TIME_ZONE = env("TIME_ZONE", default="Asia/Kolkata")
 USE_I18N = True
 USE_TZ = True
 
+# Attendance: late_minutes = shift_start (default) | after_grace
+ATTENDANCE_LATE_MINUTES_BASIS = env(
+    "ATTENDANCE_LATE_MINUTES_BASIS",
+    default="shift_start",
+)
+
+# Payroll: minutes above threshold incur late penalty (rate defaults to per-day / 480)
+PAYROLL_LATE_PENALTY_THRESHOLD_MINUTES = env.int(
+    "PAYROLL_LATE_PENALTY_THRESHOLD_MINUTES",
+    default=15,
+)
+PAYROLL_LATE_PENALTY_RATE_PER_MINUTE = env(
+    "PAYROLL_LATE_PENALTY_RATE_PER_MINUTE",
+    default="0",
+)
+
 
 # Static/media
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
+
+# Vite production build (`npm run build` in frontend/)
+FRONTEND_BUILD_DIR = BASE_DIR / "frontend" / "dist"
+SERVE_FRONTEND = env.bool("SERVE_FRONTEND", default=True)
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
@@ -208,7 +267,7 @@ SPECTACULAR_SETTINGS = {
 }
 
 
-# Email / SMTP
+# Email / SMTP (loaded from .env for security)
 EMAIL_BACKEND = env.str("EMAIL_BACKEND", default="django.core.mail.backends.smtp.EmailBackend")
 EMAIL_HOST = env.str("EMAIL_HOST", default="smtpout.secureserver.net")
 EMAIL_PORT = env.int("EMAIL_PORT", default=465)
@@ -218,15 +277,42 @@ EMAIL_HOST_USER = env.str("EMAIL_HOST_USER", default="")
 EMAIL_HOST_PASSWORD = env.str("EMAIL_HOST_PASSWORD", default="")
 DEFAULT_FROM_EMAIL = env.str("DEFAULT_FROM_EMAIL", default=EMAIL_HOST_USER or "webmaster@localhost")
 SERVER_EMAIL = env.str("SERVER_EMAIL", default=DEFAULT_FROM_EMAIL)
+EMAIL_USE_LOCALTIME = env.bool("EMAIL_USE_LOCALTIME", default=True)
+EMAIL_TIMEOUT = 30
 
 # Base URL used for building absolute links in emails (e.g. leave approval buttons).
 # Override this in production with your actual domain.
 SITE_BASE_URL = env.str("SITE_BASE_URL", default="http://127.0.0.1:8000")
+# Public frontend origin for onboarding/portal links (e.g. http://192.168.x.x:8000 on LAN).
+# When empty and SERVE_FRONTEND=1, falls back to SITE_BASE_URL; else http://localhost:5173.
+FRONTEND_BASE_URL = env.str("FRONTEND_BASE_URL", default="")
 
 
 # CORS
 CORS_ALLOW_ALL_ORIGINS = env.bool("CORS_ALLOW_ALL_ORIGINS", default=False)
-CORS_ALLOWED_ORIGINS = env.list("CORS_ALLOWED_ORIGINS", default=[])
+
+# CORS_ALLOWED_ORIGINS must be a comma-separated list in .env:
+#   CORS_ALLOWED_ORIGINS=https://a.com,https://b.com
+# Also accepts a JSON array on ONE line:
+#   CORS_ALLOWED_ORIGINS=["https://a.com","https://b.com"]
+# Multi-line Python list syntax in .env is NOT supported — use the formats above.
+def _parse_cors_origins(raw: str) -> list:
+    import json as _json
+    raw = raw.strip()
+    if not raw:
+        return []
+    # JSON array on one line
+    if raw.startswith("["):
+        try:
+            parsed = _json.loads(raw)
+            if isinstance(parsed, list):
+                return [str(u).strip() for u in parsed if str(u).strip()]
+        except Exception:
+            pass
+    # Comma-separated
+    return [u.strip() for u in raw.split(",") if u.strip()]
+
+CORS_ALLOWED_ORIGINS = _parse_cors_origins(env.str("CORS_ALLOWED_ORIGINS", default=""))
 CORS_ALLOW_CREDENTIALS = True
 
 CORS_ALLOW_HEADERS = [
@@ -243,6 +329,9 @@ CORS_ALLOW_HEADERS = [
     "x-pharmacy-branch",
 ]
 
+# Allow PDFs to be displayed in iframes from same origin
+X_FRAME_OPTIONS = "SAMEORIGIN"
+
 
 
 # Minimal logging
@@ -250,6 +339,10 @@ LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
     "handlers": {"console": {"class": "logging.StreamHandler"}},
+    "loggers": {
+        "hr.security": {"handlers": ["console"], "level": "WARNING", "propagate": False},
+        "apps.hr.biometric": {"handlers": ["console"], "level": "INFO", "propagate": False},
+    },
     "root": {"handlers": ["console"], "level": env("LOG_LEVEL", default="INFO")},
 }
 

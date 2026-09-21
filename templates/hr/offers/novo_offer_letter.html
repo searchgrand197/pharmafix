@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Offer Letter — {{ data.company_name }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 14mm 16mm 18mm 16mm;
+        }
+        body {
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            font-size: {{ data.font_size|default:14 }}px;
+            line-height: 1.55;
+            color: #1f2937;
+            margin: 0;
+            padding: 0;
+        }
+        table { border-collapse: collapse; }
+        .letterhead-table,
+        .letterhead-table td,
+        .letterhead-table tr,
+        .letter-closing,
+        .letter-closing td,
+        .letter-closing tr,
+        .doc-footer,
+        .doc-footer div {
+            border: none;
+        }
+        .letterhead-table {
+            width: 100%;
+            margin-bottom: 22px;
+            border-bottom: 1px solid #d1d5db;
+            padding-bottom: 16px;
+        }
+        .letterhead-logo-cell {
+            width: 140px;
+            vertical-align: top;
+            padding-right: 12px;
+        }
+        .letterhead-logo-cell img {
+            display: block;
+            object-fit: contain;
+        }
+        .letterhead-company-cell {
+            vertical-align: top;
+            text-align: right;
+        }
+        .company-name {
+            font-family: 'Times New Roman', 'Times', serif;
+            font-weight: bold;
+            font-size: {{ data.company_name_font_size|default:16 }}px;
+            color: {% if data.theme == 'modern' %}#111827{% elif data.theme == 'startup' %}#0F172A{% else %}#1e3a5f{% endif %};
+            margin: 0 0 6px 0;
+            padding: 0;
+        }
+        .company-meta {
+            font-family: 'Times New Roman', 'Times', serif;
+            font-size: {{ data.company_meta_font_size|default:13 }}px;
+            line-height: 1.45;
+            color: #4b5563;
+            text-align: right;
+        }
+        .company-meta p {
+            margin: 0 0 3px 0;
+            padding: 0;
+        }
+        .letter-title {
+            text-align: center;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+            font-size: {{ data.letter_title_font_size|default:22 }}px;
+            color: {% if data.theme == 'modern' %}#111827{% elif data.theme == 'startup' %}#0F172A{% else %}#1e3a5f{% endif %};
+            border-bottom: 2px solid {% if data.theme == 'modern' %}#3B82F6{% elif data.theme == 'startup' %}#10B981{% else %}#1F4E79{% endif %};
+            display: inline-block;
+            padding-bottom: 6px;
+            margin: 0 auto 22px auto;
+        }
+        .title-wrap {
+            text-align: center;
+            margin-bottom: 22px;
+        }
+        .ref-date-table {
+            width: 100%;
+            margin-bottom: 20px;
+            font-size: {{ data.letter_section_fonts.ref_date }}px;
+        }
+        .candidate-block {
+            margin-bottom: 20px;
+        }
+        .candidate-name {
+            font-weight: bold;
+            text-transform: uppercase;
+            font-size: {{ data.candidate_name_font_size|default:18 }}px;
+            color: {% if data.theme == 'modern' %}#111827{% elif data.theme == 'startup' %}#0F172A{% else %}#1e3a5f{% endif %};
+            margin: 4px 0 6px 0;
+        }
+        .heading-text {
+            text-transform: uppercase;
+            font-weight: bold;
+            border-bottom: 2px solid {% if data.theme == 'modern' %}#3B82F6{% elif data.theme == 'startup' %}#10B981{% else %}#1F4E79{% endif %};
+            color: {% if data.theme == 'modern' %}#111827{% elif data.theme == 'startup' %}#0F172A{% else %}#1e3a5f{% endif %};
+            padding-bottom: 5px;
+            display: inline-block;
+            letter-spacing: 1.2px;
+        }
+        .block-paragraph {
+            text-align: justify;
+        }
+        .block-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 4px;
+        }
+        .block-table td {
+            padding: 9px 10px;
+            border: 1px solid #d1d5db;
+            vertical-align: top;
+        }
+        .label-cell {
+            background-color: {% if data.theme == 'modern' %}#F9FAFB{% elif data.theme == 'startup' %}#ECFDF5{% else %}#F4F6F8{% endif %};
+            font-weight: bold;
+            width: 35%;
+        }
+        .terms-block {
+            margin-top: 8px;
+        }
+        .terms-title {
+            font-weight: bold;
+            font-size: {{ data.letter_section_fonts.table_title|default:13 }}px;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: {% if data.theme == 'modern' %}#111827{% elif data.theme == 'startup' %}#0F172A{% else %}#1e3a5f{% endif %};
+        }
+        .terms-item {
+            margin-bottom: 10px;
+        }
+        .terms-item-label {
+            font-weight: bold;
+            font-size: {{ data.letter_section_fonts.table_cell|default:13 }}px;
+            margin-bottom: 2px;
+        }
+        .terms-item-text {
+            font-size: {{ data.letter_section_fonts.table_cell|default:13 }}px;
+            text-align: justify;
+            color: #374151;
+        }
+        .letter-closing {
+            width: 100%;
+            margin-top: 24px;
+            page-break-inside: avoid;
+        }
+        .letter-closing td {
+            border: none;
+            padding: 0;
+            vertical-align: top;
+        }
+        .signatures-section {
+            width: 100%;
+            margin: 0;
+            padding: 0;
+        }
+        .sig-block {
+            width: 220px;
+            border: none;
+        }
+        .sig-space {
+            height: 44px;
+            border: none;
+        }
+        .signature-img {
+            {% if data.signature_config.size == 'sm' %}
+            height: 28px;
+            {% elif data.signature_config.size == 'lg' %}
+            height: 72px;
+            {% else %}
+            height: 48px;
+            {% endif %}
+            display: block;
+            border: none;
+        }
+        .sig-line {
+            border: none;
+            border-top: 1px solid #1f2937;
+            padding-top: 6px;
+            margin-top: 0;
+        }
+        .sig-line p {
+            margin: 0;
+            padding: 0;
+            border: none;
+        }
+        .sig-name {
+            margin: 0;
+            padding: 0;
+            font-weight: bold;
+            font-size: {{ data.letter_section_fonts.signatory_name }}px;
+            color: #111827;
+            line-height: 1.35;
+        }
+        .sig-meta {
+            margin: 0;
+            padding: 0;
+            font-size: {{ data.letter_section_fonts.signatory_line }}px;
+            color: #4b5563;
+            line-height: 1.35;
+        }
+        .doc-footer {
+            width: 100%;
+            margin: 10px 0 0 0;
+            padding: 0;
+            border: none;
+            text-align: center;
+            font-size: {{ data.letter_section_fonts.footer_note|default:8 }}px;
+            color: #6b7280;
+            line-height: 1.4;
+        }
+        .footer-compact {
+            margin: 0;
+            padding: 0;
+            border: none;
+        }
+        .footer-compact .footer-meta {
+            font-size: {{ data.letter_section_fonts.footer_note|default:8 }}px;
+            color: #6b7280;
+        }
+        .footer-compact .footer-legal {
+            font-size: 7px;
+            color: #9ca3af;
+            font-weight: bold;
+            letter-spacing: 0.2px;
+            text-transform: uppercase;
+        }
+        .footer-compact .footer-disclaimer {
+            font-size: 7px;
+            color: #9ca3af;
+            font-style: italic;
+            font-weight: normal;
+            text-transform: none;
+        }
+        .bold { font-weight: bold; }
+        .text-right { text-align: right; }
+    </style>
+</head>
+<body>
+    <table class="letterhead-table" cellspacing="0" cellpadding="0">
+        <tr>
+            <td class="letterhead-logo-cell">
+                {% if data.logo_config.url %}
+                <img
+                    src="{{ data.logo_config.url }}"
+                    alt=""
+                    width="{{ data.logo_config.width|default:120 }}"
+                    height="{{ data.logo_config.height|default:60 }}"
+                />
+                {% endif %}
+            </td>
+            <td class="letterhead-company-cell">
+                <div class="company-name">{{ data.company_name }}</div>
+                <div class="company-meta">
+                    {% if data.company_address %}<p>{{ data.company_address }}</p>{% endif %}
+                    {% if data.company_location %}<p>{{ data.company_location }}</p>{% endif %}
+                    {% if data.company_contact %}<p>{{ data.company_contact }}</p>{% endif %}
+                    {% if data.company_website %}<p>{{ data.company_website }}</p>{% endif %}
+                </div>
+            </td>
+        </tr>
+    </table>
+
+    <div class="title-wrap">
+        <div class="letter-title">{{ data.letter_title }}</div>
+    </div>
+
+    <table class="ref-date-table" cellspacing="0" cellpadding="0">
+        <tr>
+            <td class="bold" style="width: 50%;">{{ data.ref_label }} {{ data.ref_value }}</td>
+            <td class="bold text-right" style="width: 50%;">{{ data.date_label }} {{ data.date_value }}</td>
+        </tr>
+    </table>
+
+    <div class="candidate-block" style="font-size: {{ data.letter_section_fonts.candidate_meta }}px;">
+        <p class="bold" style="margin: 0 0 4px 0;">{{ data.to_label }}</p>
+        <p class="candidate-name">{{ data.candidate_name }}</p>
+        {% if data.candidate_address %}<p style="margin: 0 0 4px 0;">{{ data.candidate_address }}</p>{% endif %}
+        {% if data.candidate_email %}<p style="margin: 0 0 4px 0;">{{ data.candidate_email }}</p>{% endif %}
+        {% if data.candidate_phone %}<p style="margin: 0;">{{ data.candidate_phone }}</p>{% endif %}
+    </div>
+
+    <div style="margin-bottom: 18px; font-size: {{ data.letter_section_fonts.salutation }}px;">
+        <p style="margin: 0;">{{ data.dear_label }} <span class="bold">{{ data.candidate_name_salutation|default:data.candidate_name }}</span>,</p>
+    </div>
+
+    <div class="dynamic-content">
+        {% for block in dynamic_content %}
+            <div style="margin-top: {{ block.marginTop|default:0 }}px; margin-bottom: {{ block.marginBottom|default:18 }}px;">
+                {% if block.type == 'heading' %}
+                    <div style="text-align: center;">
+                        <div class="heading-text" style="font-size: {{ block.fontSize|default:18 }}px;">{{ block.content }}</div>
+                    </div>
+                {% elif block.type == 'paragraph' %}
+                    <div class="block-paragraph" style="font-size: {{ block.fontSize|default:data.font_size|default:14 }}px;">
+                        {{ block.content|linebreaksbr }}
+                    </div>
+                {% elif block.type == 'table' %}
+                    {% if block.title %}
+                    <div style="font-size: {{ block.titleFontSize|default:data.letter_section_fonts.table_title }}px; font-weight: bold; margin-bottom: 8px;">{{ block.title }}</div>
+                    {% endif %}
+                    <table class="block-table" style="font-size: {{ block.cellFontSize|default:data.letter_section_fonts.table_cell }}px;">
+                        {% for row in block.rows %}
+                            <tr>
+                                {% for col in row.cols %}
+                                    <td class="{% if forloop.first %}label-cell{% endif %}">{{ col }}</td>
+                                {% empty %}
+                                    <td class="label-cell">&nbsp;</td>
+                                {% endfor %}
+                            </tr>
+                        {% endfor %}
+                    </table>
+                {% elif block.type == 'terms' %}
+                    <div class="terms-block">
+                        {% if block.title %}
+                        <div class="terms-title">{{ block.title }}</div>
+                        {% endif %}
+                        {% for item in block.items %}
+                        <div class="terms-item">
+                            {% if item.label %}
+                            <div class="terms-item-label">{{ item.label }}</div>
+                            {% endif %}
+                            <div class="terms-item-text">{{ item.text|linebreaksbr }}</div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+
+    <table class="letter-closing" cellspacing="0" cellpadding="0" width="100%">
+        <tr>
+            <td>
+                <div class="signatures-section">
+                    <div class="sig-block">
+                        <div class="sig-space">
+                            {% if data.signature_config.url %}
+                            <img src="{{ data.signature_config.url }}" class="signature-img" alt="" />
+                            {% endif %}
+                        </div>
+                        <div class="sig-line">
+                            <p class="sig-name">{{ data.hr_name }}</p>
+                            <p class="sig-meta">{{ data.hr_designation }}</p>
+                            <p class="sig-meta">For {{ data.company_name }}</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="doc-footer">
+                    <div class="footer-compact">
+                        {% if data.footer_registered_office or data.footer_corporate_office or data.footer_website or data.footer_hr_email or data.footer_company_registration %}
+                        <span class="footer-meta">
+                            {% if data.footer_registered_office or data.footer_corporate_office %}
+                            {% if data.footer_registered_office %}<span class="bold">Reg. Office:</span> {{ data.footer_registered_office }}{% endif %}{% if data.footer_registered_office and data.footer_corporate_office %} &nbsp;&bull;&nbsp; {% endif %}{% if data.footer_corporate_office %}<span class="bold">Corp. Office:</span> {{ data.footer_corporate_office }}{% endif %}
+                            {% if data.footer_registered_office or data.footer_corporate_office %}{% if data.footer_website or data.footer_hr_email or data.footer_company_registration %}<br />{% endif %}{% endif %}
+                            {% endif %}
+                            {% if data.footer_website %}{{ data.footer_website }}{% endif %}{% if data.footer_website and data.footer_hr_email %} &nbsp;&bull;&nbsp; {% endif %}{% if data.footer_hr_email %}HR: {{ data.footer_hr_email }}{% endif %}{% if data.footer_company_registration %}{% if data.footer_website or data.footer_hr_email %} &nbsp;&bull;&nbsp; {% endif %}<span class="bold">CIN:</span> {{ data.footer_company_registration }}{% endif %}
+                        </span>
+                        {% if data.footer_confidentiality_note or data.system_disclaimer %}<br />{% endif %}
+                        {% endif %}
+                        {% if data.footer_confidentiality_note %}
+                        <span class="footer-legal">{{ data.footer_confidentiality_note }}</span>
+                        {% endif %}
+                        {% if data.footer_confidentiality_note and data.system_disclaimer %}<br />{% endif %}
+                        {% if data.system_disclaimer %}
+                        <span class="footer-disclaimer">{{ data.system_disclaimer }}</span>
+                        {% endif %}
+                    </div>
+                </div>
+            </td>
+        </tr>
+    </table>
+
+</body>
+</html>

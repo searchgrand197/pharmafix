@@ -9,6 +9,8 @@ ALL_PORTAL_CODES: tuple[str, ...] = (
     "lab",
     "pharmacy",
     "admin",
+    "hr",
+    "employee",
 )
 
 PORTAL_LABELS: dict[str, str] = {
@@ -18,4 +20,6 @@ PORTAL_LABELS: dict[str, str] = {
     "lab": "Lab",
     "pharmacy": "Pharmacy",
     "admin": "Admin",
+    "hr": "HR",
+    "employee": "Employee",
 }

@@ -741,6 +741,46 @@ export default function OpdGeneratorTab({ settingsRevision = 0, onOpdFieldConfig
                 <div id="table-list" />
               </div>
 
+              {/* ── Prescription Box ── */}
+              <h2>Prescription Box</h2>
+              <div className="editor-values">
+                <span className="field-hint">
+                  Drag on canvas to position. Mark Done prints only prescription text here — no background or patient fields.
+                </span>
+                <button type="button" id="add-rx-box-btn" className="secondary-btn" style={{ width: '100%', marginTop: 8 }}>
+                  + Prescription Box
+                </button>
+                <div id="rx-box-props" style={{ display: 'none', marginTop: 10 }}>
+                  <p className="field-hint" style={{ margin: '0 0 6px', fontWeight: 600 }}>Include on Mark Done print:</p>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 4 }}>
+                    <input type="checkbox" id="rx-box-show-rx" defaultChecked /> Pharmacy Prescription
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 4 }}>
+                    <input type="checkbox" id="rx-box-show-cc" defaultChecked /> Chief Complaint
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 4 }}>
+                    <input type="checkbox" id="rx-box-show-notes" defaultChecked /> Notes / Advice
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 8 }}>
+                    <input type="checkbox" id="rx-box-show-fup" defaultChecked /> Follow-up Date
+                  </label>
+                  <p className="field-hint" style={{ margin: '0 0 6px', fontWeight: 600 }}>Prescription table columns:</p>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 4 }}>
+                    <input type="checkbox" id="rx-box-qty" defaultChecked /> Show Qty
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, marginBottom: 8 }}>
+                    <input type="checkbox" id="rx-box-timing" defaultChecked /> Show Timing
+                  </label>
+                  <div className="field" style={{ marginBottom: 8 }}>
+                    <label htmlFor="rx-box-fontsize">Font size</label>
+                    <input id="rx-box-fontsize" type="number" min="7" max="16" defaultValue={10} />
+                  </div>
+                  <button type="button" id="remove-rx-box-btn" className="secondary-btn" style={{ width: '100%', color: '#b91c1c' }}>
+                    Remove Prescription Box
+                  </button>
+                </div>
+              </div>
+
               {/* ── Save layout ── */}
               <h2>Save layout</h2>
               <p className="field-hint">

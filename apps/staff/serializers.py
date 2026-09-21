@@ -220,6 +220,11 @@ class StaffProfileCreateUpdateSerializer(serializers.ModelSerializer):
             "allowed_pharmacies",
         ]
 
+    def validate_email(self, value):
+        if value in (None, ""):
+            return value
+        return value.strip().lower()
+
     def validate_allowed_pharmacies(self, value):
         if value is None:
             return []

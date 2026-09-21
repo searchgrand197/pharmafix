@@ -770,6 +770,51 @@
   pointer-events: none;
 }
 
+/* ── Prescription box on canvas ── */
+.dynamic-rx-box {
+  position: absolute;
+  cursor: grab;
+  z-index: 2;
+  overflow: visible;
+  box-sizing: border-box;
+  border: 2px dashed #d97706;
+  background: rgba(251, 191, 36, 0.08);
+  border-radius: 4px;
+}
+
+.dynamic-rx-box:active {
+  cursor: grabbing;
+}
+
+.dynamic-rx-box-inner {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  pointer-events: none;
+  color: #92400e;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.dynamic-rx-box-title {
+  font-weight: 800;
+  font-size: 11px;
+  margin-bottom: 4px;
+}
+
+.dynamic-rx-box-preview {
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+
+.dynamic-rx-box-sample {
+  font-style: italic;
+  opacity: 0.7;
+  font-size: 9px;
+}
+
 .editor-colors .color-row input[type='color'] {
   width: 36px;
   height: 28px;

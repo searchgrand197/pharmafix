@@ -33,7 +33,24 @@ if [[ ! -d "${APP_DIR}/.git" ]]; then
   echo "==> Cloning repository (${BRANCH})"
   sudo -u "${APP_USER}" git clone --branch "${BRANCH}" "${REPO_URL}" "${APP_DIR}"
 else
-  echo "==> Updating repository (${BRANCH})"
+  echo "==> Backing up SQLite before code update (never overwrite client DB)"
+  BACKUP_STAMP="$(date +%Y%m%d-%H%M%S)"
+  BACKUP_DIR="${APP_DIR}/backups/db-${BACKUP_STAMP}"
+  mkdir -p "${BACKUP_DIR}"
+  chown -R "${APP_USER}:${APP_USER}" "${APP_DIR}/backups"
+  for f in db.sqlite3 db.sqlite3-wal db.sqlite3-shm; do
+    if [[ -f "${APP_DIR}/${f}" ]]; then
+      cp -a "${APP_DIR}/${f}" "${BACKUP_DIR}/${f}"
+      chown "${APP_USER}:${APP_USER}" "${BACKUP_DIR}/${f}"
+    fi
+  done
+  # Also backup SQLITE_PATH if set outside the app tree
+  if [[ -n "${SQLITE_PATH:-}" && -f "${SQLITE_PATH}" ]]; then
+    cp -a "${SQLITE_PATH}" "${BACKUP_DIR}/$(basename "${SQLITE_PATH}")"
+  fi
+
+  echo "==> Updating repository (${BRANCH}) — code only (ff-only; NO reset --hard)"
+  # db.sqlite3* must stay untracked/ignored so pull cannot replace live client data.
   sudo -u "${APP_USER}" git -C "${APP_DIR}" fetch origin
   sudo -u "${APP_USER}" git -C "${APP_DIR}" checkout "${BRANCH}"
   sudo -u "${APP_USER}" git -C "${APP_DIR}" pull --ff-only origin "${BRANCH}"
@@ -51,7 +68,7 @@ fi
 
 python3 - <<PY
 from pathlib import Path
-import secrets
+import secrets, re
 p = Path("${APP_DIR}/.env")
 text = p.read_text(encoding="utf-8")
 if "DJANGO_ENV=" in text:
@@ -67,11 +84,30 @@ if "CSRF_TRUSTED_ORIGINS=" not in text:
     text += f"\nCSRF_TRUSTED_ORIGINS=https://${DOMAIN},https://www.${DOMAIN}\n"
 if "SECRET_KEY=change-me" in text:
     text = text.replace("SECRET_KEY=change-me", "SECRET_KEY=" + secrets.token_urlsafe(50))
+# Fix CORS_ALLOWED_ORIGINS if it was written as a Python list (multi-line or bracketed).
+# Convert to a single-line comma-separated value that django-environ can parse.
+cors_multi = re.search(
+    r'(?m)^CORS_ALLOWED_ORIGINS\s*=\s*\[([^\]]*)\]',
+    text,
+    re.DOTALL,
+)
+if cors_multi:
+    urls = re.findall(r'["\']([^"\']+)["\']', cors_multi.group(1))
+    replacement = "CORS_ALLOWED_ORIGINS=" + ",".join(urls)
+    text = re.sub(
+        r'(?m)^CORS_ALLOWED_ORIGINS\s*=\s*\[[^\]]*\]',
+        replacement,
+        text,
+        flags=re.DOTALL,
+    )
 p.write_text(text, encoding="utf-8")
 PY
 
 chown "${APP_USER}:${APP_USER}" "${APP_DIR}/.env"
 chmod 600 "${APP_DIR}/.env"
+
+echo "==> Stopping service (if running) before migrations — prevents SQLite lock"
+systemctl stop "${APP_NAME}" 2>/dev/null || true
 
 echo "==> Django migrate/collectstatic"
 sudo -u "${APP_USER}" bash -lc "cd '${APP_DIR}' && .venv/bin/python manage.py migrate --noinput"
@@ -164,4 +200,7 @@ systemctl restart nginx
 echo "\nDeployment complete."
 echo "Gunicorn status: systemctl status ${APP_NAME} --no-pager"
 echo "Nginx status:    systemctl status nginx --no-pager"
+echo "IMPORTANT: never use git reset --hard on a live server with db.sqlite3 in the tree."
+echo "Prefer POSTGRES_DB=... for multi-hospital / biometric hosts (SQLite + multi-worker is fragile)."
+echo "Optional: set SQLITE_PATH=/var/lib/curevice/db.sqlite3 so pulls cannot touch the DB file."
 echo "Next step (recommended): sudo certbot --nginx -d ${DOMAIN} -d www.${DOMAIN}"

@@ -5,6 +5,7 @@ from apps.doctors.models import (
     DoctorPortalPreference,
     DoctorProfile,
     DoctorWeeklySchedule,
+    HospitalCustomRxSalt,
     Specialty,
 )
 from apps.staff.models import Department
@@ -244,4 +245,17 @@ class DoctorPortalPreferenceSerializer(serializers.ModelSerializer):
                 {"v": "EM", "l": "Empty Stomach"},
             ],
         )
+
+
+class HospitalCustomRxSaltSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = HospitalCustomRxSalt
+        fields = ["id", "name", "last_used_at", "use_count", "created_at"]
+        read_only_fields = ["id", "last_used_at", "use_count", "created_at"]
+
+    def validate_name(self, value):
+        name = str(value or "").strip()[:200]
+        if len(name) < 2:
+            raise serializers.ValidationError("Medicine name must be at least 2 characters.")
+        return name
 

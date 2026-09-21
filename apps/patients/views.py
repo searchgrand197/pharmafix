@@ -14,6 +14,10 @@ from apps.patients.services.uhid_service import generate_uhid
 from apps.roles_permissions.permissions import HasRequiredPermission
 from apps.auditlogs.services import create_audit_log
 from apps.ipd.services import resolve_ipd_doctor_name
+from apps.settings_management.ipd_process_field_config import (
+    get_hospital_process_templates,
+    get_template_name,
+)
 from apps.opd.services import resolve_opd_doctor_name
 from apps.shared.response import success_response
 
@@ -41,6 +45,7 @@ class PatientViewSet(viewsets.ModelViewSet):
         "retrieve": "patients.view_patient",
         "by_phone": "patients.view_patient",
         "lifetime_timeline": "patients.view_patient",
+        "tpa_document_pack": "patients.view_patient",
         "create": "patients.create_patient",
         "update": "patients.update_patient",
         "partial_update": "patients.update_patient",
@@ -137,7 +142,7 @@ class PatientViewSet(viewsets.ModelViewSet):
             )
 
         from apps.opd.models import OPDVisit
-        from apps.ipd.models import IPDAdmission
+        from apps.ipd.models import IPDAdmission, IPDDailyProcessLog
         from apps.discharge.models import DischargeSummary
 
         opd_rows = OPDVisit.objects.filter(
@@ -160,6 +165,14 @@ class PatientViewSet(viewsets.ModelViewSet):
                 is_deleted=False,
             )
         }
+
+        process_logs_map: dict[str, list] = {}
+        for log in IPDDailyProcessLog.objects.filter(
+            admission_id__in=[a.id for a in ipd_rows],
+            hospital_id=patient.hospital_id,
+        ).select_related("recorded_by").order_by("-log_date"):
+            key = str(log.admission_id)
+            process_logs_map.setdefault(key, []).append(log)
 
         data = {
             "patient": PatientSerializer(patient).data,
@@ -215,10 +228,89 @@ class PatientViewSet(viewsets.ModelViewSet):
                         if str(a.id) in discharge_map
                         else None
                     ),
+                    "process_logs": [
+                        {
+                            "id": str(log.id),
+                            "log_date": log.log_date,
+                            "day_number": log.day_number,
+                            "day_label": f"Day {log.day_number}" if log.day_number else "",
+                            "vitals": log.vitals or {},
+                            "medication_procedure_notes": log.medication_procedure_notes,
+                            "completed_notes": log.completed_notes,
+                            "pending_notes": log.pending_notes,
+                            "general_notes": log.general_notes,
+                            "custom_fields": log.custom_fields or {},
+                            "process_template_id": log.process_template_id or "",
+                            "process_template_name": get_template_name(
+                                get_hospital_process_templates(log.hospital_id),
+                                log.process_template_id,
+                            ),
+                            "process_field_config": log.process_field_config or {},
+                            "recorded_by_name": (
+                                f"{getattr(log.recorded_by, 'first_name', '')} {getattr(log.recorded_by, 'last_name', '')}".strip()
+                                or getattr(log.recorded_by, "email", "")
+                            ) if log.recorded_by else "",
+                            "created_at": log.created_at,
+                            "updated_at": log.updated_at,
+                        }
+                        for log in process_logs_map.get(str(a.id), [])
+                    ],
                 }
                 for a in ipd_rows
             ],
         }
+        return success_response(data=data)
+
+    @action(detail=False, methods=["get"], url_path="tpa-document-pack")
+    def tpa_document_pack(self, request, *args, **kwargs):
+        """
+        Gather insurance/TPA print documents for one discharged IPD admission
+        stay window (admission → discharge).
+        """
+        admission_id = (request.query_params.get("admission_id") or "").strip()
+        if not admission_id:
+            return Response(
+                {"success": False, "errors": {"admission_id": ["Provide `admission_id`."]}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        from apps.ipd.models import IPDAdmission
+        from apps.patients.services.tpa_document_pack import build_tpa_document_pack
+
+        adm_qs = IPDAdmission.objects.filter(is_deleted=False).select_related(
+            "patient",
+            "patient__address",
+            "assigned_doctor",
+            "scheme",
+        )
+        user = request.user
+        if not user.is_superuser:
+            adm_qs = adm_qs.filter(hospital_id=user.hospital_id)
+
+        admission = adm_qs.filter(pk=admission_id).first()
+        if not admission:
+            return Response(
+                {"success": False, "errors": {"admission": ["Admission not found."]}},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        if admission.status != IPDAdmission.Status.DISCHARGED:
+            return Response(
+                {
+                    "success": False,
+                    "errors": {"admission": ["TPA document pack is only available for discharged admissions."]},
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        patient = admission.patient
+        if not patient:
+            return Response(
+                {"success": False, "errors": {"patient": ["Admission has no patient."]}},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        data = build_tpa_document_pack(admission=admission, patient=patient)
         return success_response(data=data)
 
     def create(self, request, *args, **kwargs):

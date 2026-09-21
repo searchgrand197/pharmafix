@@ -162,6 +162,7 @@ class PharmacyInvoiceSerializer(serializers.ModelSerializer):
     party_name = serializers.CharField(source="party.name", read_only=True, default="")
     party_details = serializers.SerializerMethodField()
     cancelled_by_name = serializers.SerializerMethodField()
+    invoice_datetime = serializers.DateTimeField(write_only=True, required=False, allow_null=True)
 
     def validate(self, attrs: dict) -> dict:
         # Require either patient or party (but not both absent)
@@ -196,6 +197,26 @@ class PharmacyInvoiceSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({"paid_amount": ["Paid amount cannot exceed grand total."]})
         if payment_method == "credit" and paid_amount is not None and paid_amount > 0:
             raise serializers.ValidationError({"paid_amount": ["Keep paid amount 0 for credit bills."]})
+        invoice_dt = attrs.pop("invoice_datetime", None)
+        if invoice_dt is not None:
+            invoice_date = attrs.get("date")
+            if invoice_date is None and self.instance is not None:
+                invoice_date = self.instance.date
+            local_dt = (
+                timezone.localtime(invoice_dt)
+                if timezone.is_aware(invoice_dt)
+                else timezone.make_aware(invoice_dt, timezone.get_current_timezone())
+            )
+            local_date = local_dt.date()
+            if invoice_date is not None and invoice_date != local_date:
+                raise serializers.ValidationError(
+                    {"invoice_datetime": ["Invoice date must match the date portion of invoice datetime."]}
+                )
+            if invoice_date is None:
+                attrs["date"] = local_date
+            self._invoice_datetime = local_dt
+        else:
+            self._invoice_datetime = None
         return attrs
 
     def get_due_amount(self, obj):
@@ -244,17 +265,20 @@ class PharmacyInvoiceSerializer(serializers.ModelSerializer):
             "billing_hospital_name",
             "invoice_no",
             "date",
+            "invoice_datetime",
             "status",
             "gst_enabled",
             "subtotal",
             "total_discount",
             "cgst",
             "sgst",
+            "round_off",
             "grand_total",
             "payment_method",
             "paid_amount",
             "due_amount",
             "ipd_admission",
+            "pharmacy",
             "remarks",
             "items",
             "has_print_copy",
@@ -271,6 +295,7 @@ class PharmacyInvoiceSerializer(serializers.ModelSerializer):
             "has_print_copy",
             "print_html",
             "print_html_updated_at",
+            "pharmacy",
             "cancel_reason",
             "cancelled_by",
             "cancelled_by_name",

@@ -1,7 +1,8 @@
 from typing import Any, Dict
 
-from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied as DjangoPermissionDenied
 from django.db.models.deletion import ProtectedError
+from django.http import Http404
 from rest_framework import exceptions as drf_exceptions
 from rest_framework.response import Response
 
@@ -39,8 +40,29 @@ def api_exception_handler(exc: Exception, context: Dict[str, Any]) -> Response:
     if isinstance(exc, drf_exceptions.NotFound):
         return build({"detail": "Not found."}, 404)
 
+    # DRF get_object() raises Django Http404; without this it becomes a 500.
+    if isinstance(exc, Http404):
+        return build({"detail": "Not found."}, 404)
+
+    if isinstance(exc, ObjectDoesNotExist):
+        return build({"detail": "Not found."}, 404)
+
     if isinstance(exc, ProtectedError):
-        # e.g. DELETE department still linked by staff, doctors, or specialties (PROTECT FKs).
+        protected = getattr(exc, "protected_objects", None) or set()
+        lab_result = next(
+            (obj for obj in protected if obj.__class__.__name__ == "LabTestResult"),
+            None,
+        )
+        if lab_result is not None:
+            return build(
+                {
+                    "detail": (
+                        "This lab test template is used on existing reports and cannot be deleted. "
+                        "Mark it inactive to hide it from new registrations while keeping old reports intact."
+                    ),
+                },
+                409,
+            )
         return build(
             {
                 "detail": "Cannot delete this record because other records still reference it. "
