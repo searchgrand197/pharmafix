@@ -4669,13 +4669,53 @@ function resolveInitialDischargedOn(admission, dischargeRecord) {
   return ''
 }
 
-function resolveStayEndDateLabel(admission) {
+function combineDateAndHtmlTime(dateRaw, timeRaw) {
+  if (!dateRaw) return null
+  const datePart = String(dateRaw).slice(0, 10)
+  const t = toHtmlTimeValue(timeRaw)
+  if (t) {
+    const withTime = new Date(`${datePart}T${t}:00`)
+    if (!Number.isNaN(withTime.getTime())) return { date: withTime, hasTime: true }
+  }
+  const dateOnly = new Date(`${datePart}T12:00:00`)
+  if (Number.isNaN(dateOnly.getTime())) return null
+  return { date: dateOnly, hasTime: false }
+}
+
+/** Print label: date + time via hospital 12h/24h tokens (includes AM/PM in 12h mode). */
+function formatPrintDateTimeLabel(dateRaw, timeRaw, { dateStyle = 'd/M/yyyy' } = {}) {
+  const combined = combineDateAndHtmlTime(dateRaw, timeRaw)
+  if (!combined) return '—'
+  if (combined.hasTime) return formatDateTime(combined.date, { dateStyle })
+  try {
+    return format(combined.date, dateStyle)
+  } catch {
+    return '—'
+  }
+}
+
+function resolveStayStartDateTimeLabel(admission) {
+  if (!admission?.admission_date) return '—'
+  return formatPrintDateTimeLabel(
+    admission.admission_date,
+    admission.admission_time || admission.created_at,
+    { dateStyle: 'd/M/yy' },
+  )
+}
+
+function resolveStayEndDateTimeLabel(admission, dischargeSummary = null) {
+  const summary = dischargeSummary || admission?.discharge_summary || null
+  if (summary?.discharge_date) {
+    return formatPrintDateTimeLabel(summary.discharge_date, summary.discharge_time, { dateStyle: 'd/M/yy' })
+  }
   if (admission?.discharged_at) {
-    return format(new Date(admission.discharged_at), 'd/M/yy')
+    return formatDateTime(admission.discharged_at, { dateStyle: 'd/M/yy' })
   }
   const d = admission?.discharge_date
-  if (d) return format(new Date(`${String(d).slice(0, 10)}T12:00:00`), 'd/M/yy')
-  return format(new Date(), 'd/M/yy')
+  if (d) {
+    return formatPrintDateTimeLabel(d, admission?.discharge_time, { dateStyle: 'd/M/yy' })
+  }
+  return formatDateTime(new Date(), { dateStyle: 'd/M/yy' })
 }
 
 function resolveIpdBillDateTime(admission, dischargeSummary = null) {
@@ -4684,7 +4724,7 @@ function resolveIpdBillDateTime(admission, dischargeSummary = null) {
     const datePart = String(summary.discharge_date).slice(0, 10)
     let timePart = '12:00:00'
     if (summary.discharge_time) {
-      const t = String(summary.discharge_time)
+      const t = toHtmlTimeValue(summary.discharge_time) || String(summary.discharge_time)
       timePart = t.length <= 5 ? `${t}:00` : t.slice(0, 8)
     }
     const dt = new Date(`${datePart}T${timePart}`)
@@ -8170,6 +8210,8 @@ function PrintDischargeSummary({ rec, admission: admissionProp, onClose, onPrint
   const isMobile = useIsMobile()
   const printRef = useRef(null)
   const [printReady, setPrintReady] = useState(false)
+  // Re-render when hospital 12h/24h mode changes so printed times include AM/PM.
+  useTimeDisplayMode()
   const slipProfile = getPaymentSlipProfile()
   const hospitalName = (slipProfile.hospital_name || DEFAULT_PAYMENT_SLIP_PROFILE.hospital_name).toUpperCase()
   const address = slipProfile.address || DEFAULT_PAYMENT_SLIP_PROFILE.address
@@ -8285,43 +8327,15 @@ function PrintDischargeSummary({ rec, admission: admissionProp, onClose, onPrint
     return () => window.removeEventListener('beforeprint', onBeforePrint)
   }, [])
 
-  const fmtAdmissionWhen = () => {
-    const dateRaw = rec.admission_date || adm.admission_date
-    if (!dateRaw) return '—'
-    try {
-      const datePart = String(dateRaw).slice(0, 10)
-      let s = format(new Date(`${datePart}T12:00:00`), 'd/M/yyyy')
-      const t =
-        toHtmlTimeValue(rec.admission_time)
-        || toHtmlTimeValue(adm.admission_time)
-        || toHtmlTimeValue(adm.created_at)
-      if (t) {
-        const dt = new Date(`${datePart}T${t}:00`)
-        if (!Number.isNaN(dt.getTime())) s += ` ${formatTime(dt)}`
-        else s += ` ${t}`
-      }
-      return s
-    } catch {
-      return '—'
-    }
-  }
+  const fmtAdmissionWhen = () => formatPrintDateTimeLabel(
+    rec.admission_date || adm.admission_date,
+    rec.admission_time || adm.admission_time || adm.created_at,
+    { dateStyle: 'd/M/yyyy' },
+  )
 
   const fmtDischargeWhen = () => {
     if (rec.discharge_date) {
-      try {
-        let s = format(new Date(`${rec.discharge_date}T12:00:00`), 'd/M/yyyy')
-        if (rec.discharge_time) {
-          const t = toHtmlTimeValue(rec.discharge_time) || String(rec.discharge_time).slice(0, 5)
-          if (t) {
-            const dt = new Date(`${rec.discharge_date}T${t}:00`)
-            if (!Number.isNaN(dt.getTime())) s += ` ${formatTime(dt)}`
-            else s += ` ${t}`
-          }
-        }
-        return s
-      } catch {
-        return '—'
-      }
+      return formatPrintDateTimeLabel(rec.discharge_date, rec.discharge_time, { dateStyle: 'd/M/yyyy' })
     }
     if (adm.discharged_at) {
       try { return formatDateTime(adm.discharged_at, { dateStyle: 'd/M/yyyy' }) } catch { return '—' }
@@ -17921,11 +17935,13 @@ function AdmissionLedgerModal({ admission, onClose, onDischarged, autoDischarge 
 }
 
 
-function PrintIpdLedger({ admission, ledger, onClose, autoPrint = true, embedded = false, dischargeSummary: _dischargeSummaryProp = null }) {
+function PrintIpdLedger({ admission, ledger, onClose, autoPrint = true, embedded = false, dischargeSummary = null }) {
   const isMobile = useIsMobile()
   const printRef = useRef(null)
   const [printAdmission, setPrintAdmission] = useState(() => ({ ...admission }))
   const [printReady, setPrintReady] = useState(false)
+  // Re-render when hospital 12h/24h mode changes so Stay Period times include AM/PM.
+  useTimeDisplayMode()
   const slipProfile = getPaymentSlipProfile()
   const logoUrl = resolvePaymentSlipLogoUrl(slipProfile)
   const hospitalName = (slipProfile.hospital_name || DEFAULT_PAYMENT_SLIP_PROFILE.hospital_name).toUpperCase()
@@ -18117,7 +18133,7 @@ function PrintIpdLedger({ admission, ledger, onClose, autoPrint = true, embedded
               <div className="flex"><span className="w-28 font-bold">UHID No</span><span className="font-medium">: {printAdmission.patient_uhid || '—'}</span></div>
               <div className="flex"><span className="w-28 font-bold">IPD No</span><span className="font-medium">: {printAdmission.ipd_no || '—'}</span></div>
               <div className="flex"><span className="w-28 font-bold">Room / Bed</span><span className="font-medium">: {printAdmission.room_name || '—'} / {printAdmission.bed_code || '—'}</span></div>
-              <div className="flex"><span className="w-28 font-bold">Stay Period</span><span className="font-medium">: {printAdmission.admission_date ? format(new Date(printAdmission.admission_date), 'd/M/yy') : '—'} to {resolveStayEndDateLabel(printAdmission)}</span></div>
+              <div className="flex"><span className="w-28 font-bold">Stay Period</span><span className="font-medium">: {resolveStayStartDateTimeLabel(printAdmission)} to {resolveStayEndDateTimeLabel(printAdmission, dischargeSummary)}</span></div>
             </div>
           </div>
 

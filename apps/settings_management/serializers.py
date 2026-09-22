@@ -157,7 +157,7 @@ class ReceptionPortalSettingsSerializer(serializers.ModelSerializer):
 
     def validate_time_display_mode(self, value):
         allowed = {"12h", "24h"}
-        mode = str(value or "24h").strip()
+        mode = str(value or "12h").strip()
         if mode not in allowed:
             raise serializers.ValidationError("Must be 12h or 24h.")
         return mode
