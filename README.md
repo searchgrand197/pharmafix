@@ -57,3 +57,4 @@ SERVE_FRONTEND=1
 - Biometric K90 server URL: `http://<IP>:8000/iclock/`
 
 Re-send onboarding welcome emails after changing base URLs; older emails may still point at `localhost:5173`.
+# pharmafix
