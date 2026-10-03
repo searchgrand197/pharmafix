@@ -203,6 +203,23 @@ function rowExpiryStatus(row) {
   return expiryMeta(row.batch?.expiry_date).status
 }
 
+/** `{ available, requested }` when the line asks for more than the batch has, else null. */
+function rowStockShortage(row) {
+  if (!row?.medicine || !row?.batch) return null
+  const rawAvail = row.batch.quantity
+  if (rawAvail == null || rawAvail === '') return null
+  const available = Number(rawAvail)
+  if (!Number.isFinite(available)) return null
+  const requested = (Number(row.qty) || 0) + (Number(row.free_qty) || 0)
+  if (!(requested > 0) || requested <= available + 1e-9) return null
+  return { available, requested }
+}
+
+function isSellablePick(pick) {
+  if (typeof pick?.sellable === 'boolean') return pick.sellable
+  return Number(pick?.batch?.stock) > 0 && !pick?.batch?.is_sale_blocked
+}
+
 const SearchHitRow = memo(function SearchHitRow({ pick, disabled, onPick, categoryRows }) {
   const categoryPath = React.useMemo(() => {
     const catId = pick?.medicine?.category
@@ -241,6 +258,18 @@ const SearchHitRow = memo(function SearchHitRow({ pick, disabled, onPick, catego
         ) : null}
         <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-slate-600">
           <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded">Batch {pick.batch.batch_no}</span>
+          {pick.batch?.is_sale_blocked ? (
+            <span
+              className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-rose-100 text-rose-800 border-rose-200"
+              title={pick.batch.sale_block_reason || 'Blocked for sale'}
+            >
+              BLOCKED{pick.batch.sale_block_reason ? `: ${pick.batch.sale_block_reason}` : ''}
+            </span>
+          ) : !(Number(pick.batch?.stock) > 0) ? (
+            <span className="text-[9px] font-bold px-1.5 py-0.5 rounded border bg-slate-200 text-slate-700 border-slate-300">
+              0 stock
+            </span>
+          ) : null}
           {pick.medicine.form ? (
             <span className="bg-violet-50 text-violet-700 border border-violet-100 px-1.5 py-0.5 rounded">
               {pick.medicine.form}
@@ -311,6 +340,13 @@ function ErpBillingViewInner({
   const debouncedPSearch = useDebouncedValue(pSearch, 260)
   const [searchResults, setSearchResults] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
+  const [showHiddenBatches, setShowHiddenBatches] = useState(false)
+  const { sellableResults, hiddenResults } = useMemo(() => {
+    const sellable = []
+    const hidden = []
+    for (const p of searchResults) (isSellablePick(p) ? sellable : hidden).push(p)
+    return { sellableResults: sellable, hiddenResults: hidden }
+  }, [searchResults])
   /** When set, this row shows product search to replace medicine/batch (same row id). */
   const [replacingRowId, setReplacingRowId] = useState(null)
   const [gstEnabled, setGstEnabled] = useState(() => !!channelOutlet?.default_sale_gst_enabled)
@@ -425,6 +461,10 @@ function ErpBillingViewInner({
       cancelled = true
     }
   }, [])
+
+  React.useEffect(() => {
+    setShowHiddenBatches(false)
+  }, [pSearch])
 
   React.useEffect(() => {
     if (debouncedPSearch.length < 2) {
@@ -558,6 +598,37 @@ function ErpBillingViewInner({
     }
     return Math.round(gross * 100) / 100
   }, [rows])
+
+  /** row id -> { available, requested } for lines that exceed batch stock. */
+  const stockShortages = useMemo(() => {
+    const out = {}
+    for (const r of rows) {
+      const s = rowStockShortage(r)
+      if (s) out[r.id] = s
+    }
+    return out
+  }, [rows])
+
+  const warnedShortageRef = useRef(new Set())
+  React.useEffect(() => {
+    const warned = warnedShortageRef.current
+    for (const id of [...warned]) {
+      if (!stockShortages[id]) warned.delete(id)
+    }
+    rows.forEach((r, idx) => {
+      const s = stockShortages[r.id]
+      if (!s || warned.has(r.id)) return
+      warned.add(r.id)
+      toast.error(
+        `Line ${idx + 1}: ${medicineNickName(r.medicine)} has only ${formatStockByCategoryRules(
+          s.available,
+          r,
+          medicineCategoryRows,
+        )} in stock`,
+        { id: `stock-short-${r.id}` },
+      )
+    })
+  }, [stockShortages, rows, medicineCategoryRows])
 
   React.useEffect(() => {
     if (paymentMethod === 'credit' && linkedAdmission) {
@@ -865,7 +936,7 @@ function ErpBillingViewInner({
       e.preventDefault()
       if (field === 'product') {
         const first =
-          searchResults.find((p) => !(p.expiry_status === 'expired' && !allowExpiredSale)) ?? null
+          sellableResults.find((p) => !(p.expiry_status === 'expired' && !allowExpiredSale)) ?? null
         if (first) applySearchPick(rowId, first)
       } else if (field === 'packs') {
         const row = rows[idx]
@@ -923,42 +994,27 @@ function ErpBillingViewInner({
       }
     }
 
-    let createdInvoice = null
-    try {
-      if (draftInvoiceToLoad?.id) {
-        // Clean up draft before finalizing to prevent duplicate invoice numbers or logic tangles
-        await api.delete(`/pharmacy/invoices/${draftInvoiceToLoad.id}/`).catch(() => {})
-        setDraftInvoiceToLoad(null)
-      }
+    const shortLines = rows
+      .map((r, i) => ({ r, i, s: stockShortages[r.id] }))
+      .filter((x) => x.s && valid.includes(x.r))
+    if (shortLines.length) {
+      const detail = shortLines
+        .map(
+          ({ r, i, s }) =>
+            `line ${i + 1} ${medicineNickName(r.medicine)} (only ${formatStockByCategoryRules(
+              s.available,
+              r,
+              medicineCategoryRows,
+            )})`,
+        )
+        .join(', ')
+      toast.error(`Not enough stock: ${detail}. Reduce the quantity before saving.`, { duration: 6000 })
+      return
+    }
 
-      const walkInMeta = !b2bEnabled && selectedPt?._walkInBilling
-      const invoiceDatetimeIso = invoiceDateTimeInputToIso(invoiceDate, invoiceTime)
-      const { data: invData } = await api.post('/pharmacy/invoices/', {
-        patient: b2bEnabled ? null : selectedPt.id,
-        party: b2bEnabled ? partyId : null,
-        ipd_admission: b2bEnabled ? null : (linkedAdmission?.id || null),
-        // IPD assigned_doctor is a User id; invoice referred_by expects DoctorProfile id.
-        referred_by: b2bEnabled ? null : (doctorProfileIdByUserId[String(linkedAdmission?.assigned_doctor || '')] || null),
-        billing_doctor_name: walkInMeta ? (selectedPt._billingDoctorName || '') : '',
-        billing_hospital_name: walkInMeta ? (selectedPt._billingHospitalName || '') : '',
-        invoice_no: invoiceNo || undefined,
-        date: invoiceDate || undefined,
-        ...(invoiceDatetimeIso ? { invoice_datetime: invoiceDatetimeIso } : {}),
-        gst_enabled: gstEnabled,
-        subtotal: taxableSubtotal.toFixed(2),
-        cgst: cgst.toFixed(2),
-        sgst: sgst.toFixed(2),
-        round_off: roundOff.toFixed(2),
-        grand_total: payableTotal.toFixed(2),
-        payment_method: paymentMethod,
-        paid_amount: paymentMethod === 'credit' ? '0.00' : payableTotal.toFixed(2),
-        status: 'finalized',
-      })
-      const invoice = invData?.data || invData
-      createdInvoice = invoice
+    try {
       const allowQ = allowExpiredSale ? { allow_expired: '1' } : {}
-      const itemResults = []
-      for (const r of valid) {
+      const items = valid.map((r) => {
         const base = lineSaleBaseAmount(r)
         const disc = lineDiscountRupeesFromPercent(r)
         let marg
@@ -987,27 +1043,52 @@ function ErpBillingViewInner({
           })
           half = resolved / 2
         }
-        const posted = await api.post(
-          '/pharmacy/items/',
-          {
-            invoice: invoice.id,
-            medicine: r.medicine.id,
-            batch: r.batch.id,
-            qty: r.qty,
-            free_qty: r.free_qty || 0,
-            mrp: r.batch?.mrp ?? 0,
-            rate: r.rate,
-            amount: marg.taxableAmount.toFixed(2),
-            cgst_rate: half.toFixed(2),
-            sgst_rate: half.toFixed(2),
-          },
-          { params: allowQ },
-        )
-        itemResults.push(posted)
+        return {
+          medicine: r.medicine.id,
+          batch: r.batch.id,
+          qty: r.qty,
+          free_qty: r.free_qty || 0,
+          mrp: r.batch?.mrp ?? 0,
+          rate: r.rate,
+          amount: marg.taxableAmount.toFixed(2),
+          cgst_rate: half.toFixed(2),
+          sgst_rate: half.toFixed(2),
+        }
+      })
+
+      const walkInMeta = !b2bEnabled && selectedPt?._walkInBilling
+      const invoiceDatetimeIso = invoiceDateTimeInputToIso(invoiceDate, invoiceTime)
+      // Bill, lines and stock deduction must be saved in a single request (all-or-nothing).
+      const { data: invData } = await api.post('/pharmacy/invoices/finalize-sale/', {
+        patient: b2bEnabled ? null : selectedPt.id,
+        party: b2bEnabled ? partyId : null,
+        ipd_admission: b2bEnabled ? null : (linkedAdmission?.id || null),
+        // IPD assigned_doctor is a User id; invoice referred_by expects DoctorProfile id.
+        referred_by: b2bEnabled ? null : (doctorProfileIdByUserId[String(linkedAdmission?.assigned_doctor || '')] || null),
+        billing_doctor_name: walkInMeta ? (selectedPt._billingDoctorName || '') : '',
+        billing_hospital_name: walkInMeta ? (selectedPt._billingHospitalName || '') : '',
+        invoice_no: invoiceNo || undefined,
+        date: invoiceDate || undefined,
+        ...(invoiceDatetimeIso ? { invoice_datetime: invoiceDatetimeIso } : {}),
+        gst_enabled: gstEnabled,
+        subtotal: taxableSubtotal.toFixed(2),
+        cgst: cgst.toFixed(2),
+        sgst: sgst.toFixed(2),
+        round_off: roundOff.toFixed(2),
+        total_discount: billDiscountAmount.toFixed(2),
+        grand_total: payableTotal.toFixed(2),
+        payment_method: paymentMethod,
+        paid_amount: paymentMethod === 'credit' ? '0.00' : payableTotal.toFixed(2),
+        items,
+      }, { params: allowQ })
+      const invoice = invData?.data || invData
+      if (draftInvoiceToLoad?.id) {
+        await api.delete(`/pharmacy/invoices/${draftInvoiceToLoad.id}/`).catch(() => {})
+        setDraftInvoiceToLoad(null)
       }
-      const builtItems = itemResults.map((res, i) => {
-        const saved = res.data?.data || res.data
-        const r = valid[i]
+      const savedItems = Array.isArray(invoice?.items) ? invoice.items : []
+      const builtItems = valid.map((r) => {
+        const saved = savedItems.find((s) => String(s.batch) === String(r.batch.id)) || {}
         return {
           ...r,
           ...saved,
@@ -1024,13 +1105,7 @@ function ErpBillingViewInner({
           free_qty: r.free_qty || 0,
         }
       })
-      let invForPrint = invoice
-      try {
-        const { data: fullRes } = await api.get(`/pharmacy/invoices/${invoice.id}/`)
-        invForPrint = fullRes?.data || fullRes || invoice
-      } catch {
-        /* use create response */
-      }
+      const invForPrint = invoice
       setPrintingInvoice({
         ...invForPrint,
         gst_enabled: gstEnabled,
@@ -1068,19 +1143,8 @@ function ErpBillingViewInner({
       refreshInvoiceNo()
       toast.success('Invoice Generated')
     } catch (err) {
-      if (createdInvoice?.id) {
-        try {
-          await api.delete(`/pharmacy/invoices/${createdInvoice.id}/`)
-        } catch {
-          try {
-            await api.patch(`/pharmacy/invoices/${createdInvoice.id}/`, { status: 'cancelled' })
-          } catch {
-            // best-effort cleanup only
-          }
-        }
-      }
       refreshInvoiceNo()
-      toast.error(parseApiError(err))
+      toast.error(parseApiError(err), { duration: 6000 })
     }
   }
 
@@ -1317,6 +1381,11 @@ function ErpBillingViewInner({
                   return 1
                 })()
                 const isSingleUnitPack = resolvedPackSize <= 1
+                const short = stockShortages[row.id]
+                const shortCls = short ? 'ring-1 ring-rose-500 bg-rose-50 text-rose-700' : ''
+                const shortTitle = short
+                  ? `Only ${formatStockByCategoryRules(short.available, row, medicineCategoryRows)} in stock`
+                  : undefined
                 return (
                   <div
                     key={row.id}
@@ -1378,7 +1447,7 @@ function ErpBillingViewInner({
                                   </div>
                                 )}
                                 {!searchLoading &&
-                                  searchResults.map((pick, j) => {
+                                  sellableResults.map((pick, j) => {
                                     const dis = pick.expiry_status === 'expired' && !allowExpiredSale
                                     return (
                                       <SearchHitRow
@@ -1390,6 +1459,33 @@ function ErpBillingViewInner({
                                       />
                                     )
                                   })}
+                                {!searchLoading && sellableResults.length === 0 && hiddenResults.length > 0 && (
+                                  <div className="px-3 py-1.5 text-[10px] font-semibold text-rose-700 bg-rose-50 border-b border-rose-100">
+                                    Out of stock — no sellable batch available
+                                  </div>
+                                )}
+                                {!searchLoading && hiddenResults.length > 0 && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onMouseDown={(e) => e.preventDefault()}
+                                      onClick={() => setShowHiddenBatches((v) => !v)}
+                                      className="w-full text-left px-3 py-1.5 text-[10px] font-semibold text-slate-500 bg-slate-50 hover:bg-slate-100 border-b border-slate-100"
+                                    >
+                                      {showHiddenBatches ? '▾ Hide' : '▸ Show'} out-of-stock / blocked batches ({hiddenResults.length})
+                                    </button>
+                                    {showHiddenBatches &&
+                                      hiddenResults.map((pick, j) => (
+                                        <SearchHitRow
+                                          key={`hidden-${pick.batch.id}-${j}`}
+                                          pick={pick}
+                                          disabled
+                                          categoryRows={medicineCategoryRows}
+                                          onPick={() => {}}
+                                        />
+                                      ))}
+                                  </>
+                                )}
                               </div>
                             )}
                         </div>
@@ -1425,6 +1521,9 @@ function ErpBillingViewInner({
                           <span className="text-[7px] text-slate-400 truncate">
                             {row.medicine.pack_info} | {row.medicine.hsn_code}
                           </span>
+                          {short && (
+                            <span className="text-[9px] font-bold text-rose-600 truncate">{shortTitle}</span>
+                          )}
                         </button>
                       )}
                     </div>
@@ -1474,8 +1573,8 @@ function ErpBillingViewInner({
                         value={row.packs}
                         onChange={(e) => patchRowById(row.id, { packs: sanitizePackLooseInput(e.target.value) })}
                         onKeyDown={(e) => handleRowEnter(e, row.id, 'packs')}
-                        className={INP_NUM}
-                        title={isSingleUnitPack ? 'Quantity' : 'Packs (integer)'}
+                        className={`${INP_NUM} ${shortCls}`}
+                        title={shortTitle || (isSingleUnitPack ? 'Quantity' : 'Packs (integer)')}
                         placeholder={isSingleUnitPack ? 'Qty' : 'Pack'}
                       />
                     </div>
@@ -1499,8 +1598,8 @@ function ErpBillingViewInner({
                           value={row.loose}
                           onChange={(e) => patchRowById(row.id, { loose: sanitizePackLooseInput(e.target.value) })}
                           onKeyDown={(e) => handleRowEnter(e, row.id, 'loose')}
-                          className={INP_NUM}
-                          title="Loose units"
+                          className={`${INP_NUM} ${shortCls}`}
+                          title={shortTitle || 'Loose units'}
                         />
                       )}
                     </div>

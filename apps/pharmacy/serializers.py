@@ -9,6 +9,12 @@ from apps.patients.serializers import PatientSerializer
 from apps.doctors.serializers import DoctorProfileSerializer
 
 
+def blocked_batch_message(batch) -> str:
+    msg = f"Batch {batch.batch_no} is blocked for sale"
+    reason = (getattr(batch, "sale_block_reason", "") or "").strip()
+    return f"{msg} ({reason})." if reason else f"{msg}."
+
+
 class PharmacyOutletChannelProfileSerializer(serializers.Serializer):
     address = serializers.CharField(required=False, allow_blank=True, default="")
     mobile = serializers.CharField(required=False, allow_blank=True, max_length=40, default="")
@@ -138,6 +144,10 @@ class PharmacyInvoiceItemSerializer(serializers.ModelSerializer):
             and not allow_expired
         ):
             raise serializers.ValidationError({"batch": ["This batch is expired and cannot be sold."]})
+        if batch is not None and getattr(batch, "is_sale_blocked", False):
+            batch_changed = self.instance is None or self.instance.batch_id != batch.id
+            if batch_changed:
+                raise serializers.ValidationError({"batch": [blocked_batch_message(batch)]})
         inv = attrs.get("invoice")
         if inv is None and getattr(self.instance, "invoice_id", None):
             inv = self.instance.invoice

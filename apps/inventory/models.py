@@ -121,6 +121,10 @@ class MedicineBatch(TimeStampedModel, UUIDPrimaryKeyModel):
     mrp = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     sale_rate = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00")) # Standard Sale Rate
 
+    # Manual hold (recall / damage / quarantine): batch stays in inventory but cannot be billed.
+    is_sale_blocked = models.BooleanField(default=False)
+    sale_block_reason = models.CharField(max_length=120, blank=True, default="")
+
     class Meta:
         unique_together = [("pharmacy", "medicine", "batch_no")]
         indexes = [models.Index(fields=["pharmacy", "medicine", "expiry_date"])]

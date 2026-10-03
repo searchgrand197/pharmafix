@@ -26,6 +26,22 @@ from apps.shared.response import success_response
 ZERO = Decimal("0")
 
 
+def invoice_bill_discount(inv) -> Decimal:
+    """
+    Bill-level ("additional") discount on an invoice.
+
+    Older bills never stored total_discount; for those it is recovered from the
+    saved totals the same way the printed bill shows it.
+    """
+    saved = inv.total_discount or ZERO
+    if saved > ZERO:
+        return saved
+    pre_discount = (inv.subtotal or ZERO) + (inv.cgst or ZERO) + (inv.sgst or ZERO)
+    implied = (pre_discount + (inv.round_off or ZERO) - (inv.grand_total or ZERO)).quantize(Decimal("0.01"))
+    # A few paise can differ from per-line rounding; that is not a discount.
+    return implied if implied >= Decimal("0.05") else ZERO
+
+
 def _parse_dates(params):
     raw_from = (params.get("date_from") or "").strip()
     raw_to = (params.get("date_to") or "").strip()
@@ -209,11 +225,7 @@ def _today_sales_block(pharmacy_id, date_from=None, date_to=None):
         invoice_med_margin_deltas = {}
         invoice_med_revenue_deltas = {}
 
-        # Compute discount ratio once per invoice (uses saved subtotal/gst/grand_total)
-        pre_discount = (inv.subtotal or ZERO) + (inv.cgst or ZERO) + (inv.sgst or ZERO)
-        discount_ratio = Decimal("1")
-        if pre_discount > ZERO and inv.total_discount and inv.total_discount > ZERO:
-            discount_ratio = (inv.grand_total or ZERO) / pre_discount
+        bill_discount = invoice_bill_discount(inv)
 
         for it in inv.items.all():
             qty = it.qty or ZERO
@@ -248,17 +260,16 @@ def _today_sales_block(pharmacy_id, date_from=None, date_to=None):
             invoice_med_margin_deltas[mid] = invoice_med_margin_deltas.get(mid, ZERO) + item_margin
             invoice_med_revenue_deltas[mid] = invoice_med_revenue_deltas.get(mid, ZERO) + line_revenue
 
-        # Apply discount ratio to inv_margin, per-medicine margin, and per-medicine revenue
-        if discount_ratio != Decimal("1"):
-            inv_margin = (inv_margin * discount_ratio).quantize(Decimal("0.01"))
-            for mid, raw_margin in invoice_med_margin_deltas.items():
-                adjusted = (raw_margin * discount_ratio).quantize(Decimal("0.01"))
-                med_map[mid]["total_margin"] -= raw_margin
-                med_map[mid]["total_margin"] += adjusted
-            for mid, raw_revenue in invoice_med_revenue_deltas.items():
-                adjusted_rev = (raw_revenue * discount_ratio).quantize(Decimal("0.01"))
-                med_map[mid]["total_revenue"] -= raw_revenue
-                med_map[mid]["total_revenue"] += adjusted_rev
+        # The bill-level discount is money not collected while cost stays the same, so it
+        # comes straight off the margin. Per-medicine figures share it by revenue.
+        if bill_discount > ZERO:
+            inv_margin = (inv_margin - bill_discount).quantize(Decimal("0.01"))
+            inv_revenue = sum(invoice_med_revenue_deltas.values(), ZERO)
+            if inv_revenue > ZERO:
+                for mid, raw_revenue in invoice_med_revenue_deltas.items():
+                    share = (bill_discount * raw_revenue / inv_revenue).quantize(Decimal("0.01"))
+                    med_map[mid]["total_margin"] -= share
+                    med_map[mid]["total_revenue"] -= share
 
         by_method[key]["amount"] += inv_total
         by_method[key]["margin"] += inv_margin

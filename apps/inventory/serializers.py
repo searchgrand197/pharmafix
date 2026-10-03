@@ -213,6 +213,8 @@ class MedicineBatchSerializer(serializers.ModelSerializer):
             "unit_cost",
             "mrp",
             "sale_rate",
+            "is_sale_blocked",
+            "sale_block_reason",
             "quantity",
             "created_at",
             "updated_at",
@@ -234,11 +236,19 @@ class MedicineBatchCreateUpdateSerializer(serializers.ModelSerializer):
 
 
 class MedicineBatchRatesUpdateSerializer(serializers.ModelSerializer):
-    """ERP: sale pricing and cost price may be edited from the inventory desk."""
+    """ERP: sale pricing, cost price and sale block may be edited from the inventory desk."""
 
     class Meta:
         model = MedicineBatch
-        fields = ["mrp", "sale_rate", "unit_cost"]
+        fields = ["mrp", "sale_rate", "unit_cost", "is_sale_blocked", "sale_block_reason"]
+
+    def validate(self, attrs):
+        attrs = super().validate(attrs)
+        if attrs.get("is_sale_blocked") is False:
+            attrs["sale_block_reason"] = ""
+        if "sale_block_reason" in attrs:
+            attrs["sale_block_reason"] = (attrs["sale_block_reason"] or "").strip()
+        return attrs
 
 
 

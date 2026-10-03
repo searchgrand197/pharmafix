@@ -1,5 +1,7 @@
-from django.db import IntegrityError, transaction
+import uuid
 from decimal import Decimal
+
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.dateparse import parse_date, parse_datetime
 from django.db.models import BooleanField, Case, F, Prefetch, Q, Value, When
@@ -35,6 +37,7 @@ from apps.pharmacy.serializers import (
     PharmacyOutletSettingsPatchSerializer,
     PharmacySupplierSerializer,
     PurchaseChallanSerializer,
+    blocked_batch_message,
 )
 from apps.shared.response import success_response
 
@@ -73,6 +76,44 @@ def _parse_invoice_datetime(value, *, error_key="invoice_datetime"):
     if timezone.is_naive(invoice_dt):
         invoice_dt = timezone.make_aware(invoice_dt, timezone.get_current_timezone())
     return invoice_dt
+
+
+def _reject_blocked_batches_on_edit(old_items, new_rows):
+    """
+    A blocked batch may stay on an edited bill up to the qty it already had,
+    but cannot be newly added or increased.
+    """
+    from apps.inventory.models import MedicineBatch
+
+    def _row_qty(qty, free_qty):
+        return Decimal(str(qty or 0)) + Decimal(str(free_qty or 0))
+
+    old_qty: dict[str, Decimal] = {}
+    for it in old_items:
+        if it.batch_id:
+            key = str(it.batch_id)
+            old_qty[key] = old_qty.get(key, Decimal("0")) + _row_qty(it.qty, it.free_qty)
+
+    new_qty: dict[str, Decimal] = {}
+    for row in new_rows or []:
+        bid = row.get("batch") if isinstance(row, dict) else None
+        if not bid:
+            continue
+        key = str(bid)
+        new_qty[key] = new_qty.get(key, Decimal("0")) + _row_qty(row.get("qty"), row.get("free_qty"))
+
+    valid_ids = []
+    for key in new_qty:
+        try:
+            valid_ids.append(uuid.UUID(key))
+        except ValueError:
+            continue
+    if not valid_ids:
+        return
+    blocked = MedicineBatch.objects.filter(id__in=valid_ids, is_sale_blocked=True)
+    for b in blocked:
+        if new_qty[str(b.id)] > old_qty.get(str(b.id), Decimal("0")):
+            raise ValidationError({"detail": blocked_batch_message(b)})
 
 
 def _sync_invoice_created_at(invoice, invoice_datetime):
@@ -196,13 +237,17 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset().filter(voided=False)
         # Detail / print-copy / return-summary (reception TPA): hospital-scoped by id.
         # Lists and edits stay tied to the selected pharmacy branch.
+        # The branch is also accepted because a branch may be linked to a different
+        # hospital row than the user (access is already checked by the branch middleware).
         if action in ("retrieve", "save_print_copy", "return_summary"):
+            scope = Q()
             if hospital is not None:
-                qs = qs.filter(pharmacy__hospital_id=hospital.id)
-            elif pharmacy is not None:
-                qs = qs.filter(pharmacy=pharmacy)
-            else:
+                scope |= Q(pharmacy__hospital_id=hospital.id)
+            if pharmacy is not None:
+                scope |= Q(pharmacy=pharmacy)
+            if not scope:
                 return PharmacyInvoice.objects.none()
+            qs = qs.filter(scope)
         elif pharmacy is None:
             return PharmacyInvoice.objects.none()
         else:
@@ -275,15 +320,17 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
             paid_amount = grand_total
         for _ in range(3):
             try:
-                invoice = serializer.save(
-                    pharmacy=pharmacy,
-                    created_by=self.request.user,
-                    invoice_no=invoice_no,
-                    payment_method=payment_method,
-                    grand_total=grand_total,
-                    round_off=round_off,
-                    paid_amount=paid_amount,
-                )
+                # Savepoint per attempt so a duplicate number does not poison an outer transaction.
+                with transaction.atomic():
+                    invoice = serializer.save(
+                        pharmacy=pharmacy,
+                        created_by=self.request.user,
+                        invoice_no=invoice_no,
+                        payment_method=payment_method,
+                        grand_total=grand_total,
+                        round_off=round_off,
+                        paid_amount=paid_amount,
+                    )
                 invoice_datetime = getattr(serializer, "_invoice_datetime", None)
                 if invoice_datetime is not None:
                     _sync_invoice_created_at(invoice, invoice_datetime)
@@ -303,6 +350,120 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
         invoice_datetime = getattr(serializer, "_invoice_datetime", None)
         if invoice_datetime is not None:
             _sync_invoice_created_at(invoice, invoice_datetime)
+
+    @transaction.atomic
+    def perform_destroy(self, instance):
+        if instance.status == PharmacyInvoice.Status.FINALIZED:
+            try:
+                restore_stock_for_invoice_cancel(
+                    request=self.request,
+                    pharmacy=instance.pharmacy,
+                    items=list(instance.items.select_related("batch", "medicine").all()),
+                    reference_id=str(instance.id),
+                )
+            except ValueError as exc:
+                raise ValidationError({"detail": str(exc)}) from exc
+        instance.delete()
+
+    @action(detail=False, methods=["post"], url_path="finalize-sale")
+    @transaction.atomic
+    def finalize_sale(self, request, *args, **kwargs):
+        """
+        POST /api/v1/pharmacy/invoices/finalize-sale/
+        Creates a finalized sale, all its lines and the stock deductions in one
+        transaction: if any line fails (e.g. insufficient stock) nothing is saved.
+        Body: invoice fields + items: [{medicine, batch, qty, free_qty, mrp, rate, amount, cgst_rate, sgst_rate}]
+        """
+        items_payload = request.data.get("items")
+        if not isinstance(items_payload, list) or not items_payload:
+            raise ValidationError({"detail": "At least one item is required."})
+
+        invoice_data = {k: v for k, v in request.data.items() if k != "items"}
+        invoice_data["status"] = PharmacyInvoice.Status.FINALIZED
+        inv_ser = self.get_serializer(data=invoice_data)
+        inv_ser.is_valid(raise_exception=True)
+        self.perform_create(inv_ser)
+        invoice = inv_ser.instance
+
+        ctx = self.get_serializer_context()
+        line_errors = []
+        item_sers = []
+        for line_no, row in enumerate(items_payload, start=1):
+            if not isinstance(row, dict):
+                line_errors.append(f"Line {line_no}: invalid line.")
+                continue
+            ser = PharmacyInvoiceItemSerializer(data={**row, "invoice": str(invoice.id)}, context=ctx)
+            if not ser.is_valid():
+                flat = [str(m) for msgs in ser.errors.values() for m in (msgs if isinstance(msgs, list) else [msgs])]
+                line_errors.append(f"Line {line_no}: {flat[0] if flat else 'invalid line.'}")
+                continue
+            batch = ser.validated_data.get("batch")
+            if batch is None:
+                line_errors.append(f"Line {line_no}: select a batch.")
+                continue
+            if batch.pharmacy_id != invoice.pharmacy_id:
+                line_errors.append(f"Line {line_no}: batch {batch.batch_no} does not belong to this pharmacy branch.")
+                continue
+            item_sers.append((line_no, ser))
+        if line_errors:
+            raise ValidationError({"detail": " ".join(line_errors)})
+
+        # batch_id -> [batch, total qty incl. free, [line numbers]]
+        requested = {}
+        for line_no, ser in item_sers:
+            vd = ser.validated_data
+            batch = vd["batch"]
+            qty = Decimal(vd.get("qty") or 0) + Decimal(vd.get("free_qty") or 0)
+            entry = requested.setdefault(batch.id, [batch, Decimal("0"), []])
+            entry[1] += qty
+            entry[2].append(line_no)
+
+        shortages = []
+        for batch, qty, line_nos in requested.values():
+            available = get_batch_available_qty(batch)
+            if qty > available:
+                shortages.append(
+                    {
+                        "lines": line_nos,
+                        "medicine": str(batch.medicine_id),
+                        "medicine_name": batch.medicine.name,
+                        "batch": str(batch.id),
+                        "batch_no": batch.batch_no,
+                        "available": f"{available.normalize():f}",
+                        "requested": f"{qty.normalize():f}",
+                    }
+                )
+        if shortages:
+            parts = [
+                f"Line {', '.join(str(n) for n in s['lines'])}: {s['medicine_name']} (batch {s['batch_no']}) "
+                f"only {s['available']} in stock, requested {s['requested']}"
+                for s in shortages
+            ]
+            raise ValidationError(
+                {
+                    "detail": "Insufficient stock, nothing was saved. " + "; ".join(parts) + ".",
+                    "stock_errors": shortages,
+                }
+            )
+
+        for _line_no, ser in item_sers:
+            ser.save()
+        try:
+            deduct_stock_fifo(
+                request=request,
+                pharmacy=invoice.pharmacy,
+                medicine_batch_pairs=[(batch, qty) for batch, qty, _ in requested.values()],
+                reference_id=str(invoice.id),
+            )
+        except ValueError as exc:
+            raise ValidationError({"detail": str(exc)}) from exc
+
+        fresh = self.get_queryset().get(pk=invoice.pk)
+        return success_response(
+            self.get_serializer(fresh).data,
+            message="Invoice generated.",
+            status_code=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], url_path="cancel")
     @transaction.atomic
@@ -462,6 +623,7 @@ class PharmacyInvoiceViewSet(viewsets.ModelViewSet):
             addr_obj.save(update_fields=["line1", "city", "state", "updated_at"])
 
         old_items = list(invoice.items.select_related("batch", "medicine").all())
+        _reject_blocked_batches_on_edit(old_items, items_payload)
         if invoice.status == PharmacyInvoice.Status.FINALIZED:
             try:
                 reconcile_stock_for_invoice_edit(
@@ -1042,9 +1204,12 @@ class DoctorStockSearchView(APIView):
                         "unit_cost": str(b.unit_cost),
                         "sale_rate": str(b.sale_rate),
                         "stock": stock,
+                        "is_sale_blocked": bool(b.is_sale_blocked),
+                        "sale_block_reason": b.sale_block_reason or "",
                     },
                     "expiry_status": st,
                     "days_to_expiry": days,
+                    "sellable": stock > 0 and not b.is_sale_blocked,
                 })
 
         def _match_rank(row):
@@ -1062,6 +1227,7 @@ class DoctorStockSearchView(APIView):
 
         out.sort(key=lambda r: (
             _match_rank(r),
+            0 if r["sellable"] else 1,
             0 if r["expiry_status"] == "ok" else 1 if r["expiry_status"] == "expiring" else 2,
             r["batch"]["expiry_date"] or "9999-12-31",
             r["medicine"]["name"],

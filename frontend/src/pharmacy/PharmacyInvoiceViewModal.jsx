@@ -3,6 +3,7 @@ import { X, Loader2, ChevronDown } from 'lucide-react'
 import api from '../api'
 import toast from 'react-hot-toast'
 import { formatWithPattern } from '../utils/dateTimeFormat'
+import { parseApiError } from './pharmacyCalculations'
 
 function money(v) {
   return `₹${Number(v || 0).toFixed(2)}`
@@ -47,8 +48,8 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
           setReturnSummary(summaryRes.data?.data || summaryRes.data || null)
         }
       })
-      .catch(() => {
-        if (!cancelled) toast.error('Failed to load receipt details')
+      .catch((err) => {
+        if (!cancelled) toast.error(`Failed to load receipt details: ${parseApiError(err)}`)
       })
       .finally(() => {
         if (!cancelled) setLoading(false)
@@ -75,6 +76,7 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
   const isCancelled = String(invoice?.status || '').toLowerCase() === 'cancelled'
   const totalAmt = Number(invoice?.grand_total || 0)
   const roundOffAmt = Math.round((Number(invoice?.round_off) || 0) * 100) / 100
+  const billDiscountAmt = Math.round((Number(invoice?.total_discount) || 0) * 100) / 100
   const paidAmt = Number(invoice?.paid_amount || 0)
   const dueAmt = Math.max(0, Number(invoice?.due_amount ?? totalAmt - paidAmt))
   const hasReturns = Boolean(returnSummary?.has_returns)
@@ -172,6 +174,12 @@ export default function PharmacyInvoiceViewModal({ invoiceId, onClose }) {
                       <span className="text-slate-600">Due</span>
                       <span className="font-semibold text-amber-700">{money(dueAmt)}</span>
                     </div>
+                    {billDiscountAmt > 0 && (
+                      <div className="flex justify-between text-slate-500">
+                        <span>Bill discount</span>
+                        <span>−{money(billDiscountAmt)}</span>
+                      </div>
+                    )}
                     {roundOffAmt !== 0 && (
                       <div className="flex justify-between text-slate-500">
                         <span>Round off</span>

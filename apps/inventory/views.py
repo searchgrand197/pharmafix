@@ -297,9 +297,12 @@ class MedicineViewSet(PharmacyScopedMixin, viewsets.ModelViewSet):
                             "unit_cost": str(b.unit_cost),
                             "sale_rate": str(b.sale_rate),
                             "stock": stock,
+                            "is_sale_blocked": bool(b.is_sale_blocked),
+                            "sale_block_reason": b.sale_block_reason or "",
                         },
                         "expiry_status": st,
                         "days_to_expiry": days,
+                        "sellable": stock > 0 and not b.is_sale_blocked,
                     }
                 )
 
@@ -309,8 +312,11 @@ class MedicineViewSet(PharmacyScopedMixin, viewsets.ModelViewSet):
             exp = row["batch"]["expiry_date"] or "9999-12-31"
             return (prio, exp, row["medicine"]["name"], row["batch"]["batch_no"])
 
-        out.sort(key=sort_key)
-        return success_response(out[:80])
+        # Sellable batches first (FEFO); out-of-stock / blocked ones are capped separately
+        # so they never crowd sellable batches out of the response.
+        sellable = sorted((r for r in out if r["sellable"]), key=sort_key)
+        hidden = sorted((r for r in out if not r["sellable"]), key=sort_key)
+        return success_response(sellable[:80] + hidden[:40])
 
     @action(detail=False, methods=["get"], url_path="low-stock")
     def low_stock(self, request):
@@ -419,10 +425,26 @@ class MedicineBatchViewSet(PharmacyScopedMixin, viewsets.ModelViewSet):
     def update(self, request, *args, **kwargs):
         partial = kwargs.pop("partial", False)
         instance = self.get_object()
+        was_blocked = bool(instance.is_sale_blocked)
+        before_reason = instance.sale_block_reason
         serializer = self.get_serializer(instance, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         self.perform_update(serializer)
         refreshed = self.get_queryset().get(pk=instance.pk)
+        if bool(refreshed.is_sale_blocked) != was_blocked:
+            create_audit_log(
+                request=request,
+                hospital=refreshed.pharmacy.hospital,
+                module="inventory",
+                action="block_batch_sale" if refreshed.is_sale_blocked else "unblock_batch_sale",
+                obj=refreshed,
+                before={"is_sale_blocked": was_blocked, "sale_block_reason": before_reason},
+                after={
+                    "batch_no": refreshed.batch_no,
+                    "is_sale_blocked": refreshed.is_sale_blocked,
+                    "sale_block_reason": refreshed.sale_block_reason,
+                },
+            )
         return Response(MedicineBatchSerializer(refreshed, context={"request": request}).data)
 
     @transaction.atomic

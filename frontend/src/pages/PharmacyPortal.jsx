@@ -29,6 +29,8 @@ import {
   Person as PersonMuiIcon,
   Print as PrintMuiIcon,
   History as HistoryMuiIcon,
+  Block as BlockMuiIcon,
+  CheckCircleOutlined as CheckCircleOutlineMuiIcon,
 } from '@mui/icons-material'
 import api, { getHospitalId } from '../api'
 import toast from 'react-hot-toast'
@@ -83,6 +85,8 @@ const Eye = asMuiIcon(VisibilityIcon)
 const PencilLine = asMuiIcon(EditIcon)
 const SlidersHorizontal = asMuiIcon(TuneIcon)
 const Trash2 = asMuiIcon(DeleteIcon)
+const BanIcon = asMuiIcon(BlockMuiIcon)
+const UnblockIcon = asMuiIcon(CheckCircleOutlineMuiIcon)
 const LayoutDashboard = asMuiIcon(DashboardIcon)
 const PanelLeftClose = asMuiIcon(KeyboardDoubleArrowLeftIcon)
 const PanelLeftOpen = asMuiIcon(KeyboardDoubleArrowRightIcon)
@@ -207,8 +211,10 @@ export default function PharmacyPortal() {
     })
   }, [])
 
+  const initialLoadDoneRef = useRef(false)
+  // Only the first load blanks the screen; later refreshes keep the current view mounted.
   const fetchInitialData = useCallback(async () => {
-    setLoading(true)
+    if (!initialLoadDoneRef.current) setLoading(true)
     try {
       await ensurePharmacyBranchContext()
       const [medRows, batchRows, iResp, sResp] = await Promise.all([
@@ -226,6 +232,7 @@ export default function PharmacyPortal() {
     } catch (err) {
       toast.error(err?.message || 'Failed to load pharmacy data')
     } finally {
+      initialLoadDoneRef.current = true
       setLoading(false)
     }
   }, [])
@@ -233,6 +240,21 @@ export default function PharmacyPortal() {
   useEffect(() => {
     fetchInitialData()
   }, [fetchInitialData])
+
+  const upsertBatch = useCallback((batch) => {
+    if (!batch?.id) return
+    setBatches((prev) => {
+      const ix = prev.findIndex((b) => String(b.id) === String(batch.id))
+      if (ix < 0) return [batch, ...prev]
+      const next = [...prev]
+      next[ix] = { ...prev[ix], ...batch }
+      return next
+    })
+  }, [])
+
+  const removeBatch = useCallback((batchId) => {
+    setBatches((prev) => prev.filter((b) => String(b.id) !== String(batchId)))
+  }, [])
 
   useEffect(() => {
     const onResize = () => {
@@ -466,6 +488,8 @@ export default function PharmacyPortal() {
                     batches={batches}
                     setShowAddMedicine={setShowAddMedicine}
                     fetchInitialData={fetchInitialData}
+                    onBatchUpdated={upsertBatch}
+                    onBatchRemoved={removeBatch}
                     outletSettings={b2cOutlet}
                   />
                 )}
@@ -781,7 +805,15 @@ function formatStockLedgerLabel(r) {
   return r.reason || '—'
 }
 
-function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialData, outletSettings }) {
+function InventoryView({
+  medicines,
+  batches,
+  setShowAddMedicine,
+  fetchInitialData,
+  onBatchUpdated,
+  onBatchRemoved,
+  outletSettings,
+}) {
   const PAGE_SIZE = 15
   const [q, setQ] = useState('')
   const [invTab, setInvTab] = useState('all')
@@ -793,7 +825,28 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
   const [rateBatch, setRateBatch] = useState(null)
   const [adjustBatch, setAdjustBatch] = useState(null)
   const [deletingBatchId, setDeletingBatchId] = useState(null)
+  const [blockBatch, setBlockBatch] = useState(null)
   const [medicineCategoryRows, setMedicineCategoryRows] = useState([])
+  const [lowStockReload, setLowStockReload] = useState(0)
+
+  const refreshBatch = useCallback(
+    async (batchId) => {
+      setLowStockReload((n) => n + 1)
+      try {
+        const res = await api.get(`/batches/${batchId}/`)
+        const body = res.data
+        const fresh = body?.id ? body : body?.data?.id ? body.data : body?.entity
+        if (fresh?.id && onBatchUpdated) {
+          onBatchUpdated(fresh)
+          return
+        }
+      } catch {
+        /* fall back to a full reload below */
+      }
+      fetchInitialData?.()
+    },
+    [onBatchUpdated, fetchInitialData],
+  )
 
   useEffect(() => {
     let cancelled = false
@@ -834,7 +887,7 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
       .catch(() => { if (!cancelled) setLowStockItems([]) })
       .finally(() => { if (!cancelled) setLowStockLoading(false) })
     return () => { cancelled = true }
-  }, [invTab])
+  }, [invTab, lowStockReload])
 
   const qLower = q.toLowerCase()
   const medicineById = buildMedicineByIdMap(medicines)
@@ -907,12 +960,18 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
     try {
       await api.delete(`/batches/${batch.id}/`)
       toast.success('Inventory batch deleted')
-      fetchInitialData?.()
+      if (onBatchRemoved) onBatchRemoved(batch.id)
+      else fetchInitialData?.()
+      setLowStockReload((n) => n + 1)
     } catch (e) {
       toast.error(parseApiError(e) || 'Could not delete inventory batch')
     } finally {
       setDeletingBatchId(null)
     }
+  }
+
+  function handleToggleBlockBatch(batch, med) {
+    setBlockBatch({ batch, medicine: med })
   }
 
   return (
@@ -1085,6 +1144,14 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
                         <span className="font-mono text-[10px] bg-slate-100 px-1 py-0.5 rounded inline-block max-w-full truncate" title={b.batch_no}>
                           {b.batch_no}
                         </span>
+                        {b.is_sale_blocked && (
+                          <span
+                            className="mt-0.5 block w-fit text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-rose-100 text-rose-700 border border-rose-200"
+                            title={b.sale_block_reason || 'Blocked for sale'}
+                          >
+                            Blocked
+                          </span>
+                        )}
                       </td>
                       <td className={`px-2 py-1 align-top tabular-nums ${expCls}`}>{safeFormat(b.expiry_date, 'MM/yy')}</td>
                       <td className="px-2 py-1 align-top text-emerald-800 font-medium leading-tight break-words">
@@ -1125,6 +1192,18 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
                             className="p-1 rounded border border-slate-200 text-slate-600 hover:bg-slate-100"
                           >
                             <SlidersHorizontal size={12} />
+                          </button>
+                          <button
+                            type="button"
+                            title={b.is_sale_blocked ? 'Unblock for sale' : 'Block for sale'}
+                            onClick={() => handleToggleBlockBatch(b, med)}
+                            className={`p-1 rounded border disabled:opacity-50 disabled:cursor-not-allowed ${
+                              b.is_sale_blocked
+                                ? 'border-emerald-200 text-emerald-700 hover:bg-emerald-50'
+                                : 'border-amber-200 text-amber-700 hover:bg-amber-50'
+                            }`}
+                          >
+                            {b.is_sale_blocked ? <UnblockIcon size={12} /> : <BanIcon size={12} />}
                           </button>
                           <button
                             type="button"
@@ -1228,7 +1307,9 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
           customCategories={medicineCategoryRows}
           onClose={() => setRateBatch(null)}
           onSaved={() => {
+            const id = rateBatch.batch.id
             setRateBatch(null)
+            refreshBatch(id)
             fetchInitialData?.()
           }}
         />
@@ -1241,11 +1322,180 @@ function InventoryView({ medicines, batches, setShowAddMedicine, fetchInitialDat
           allowNegative={allowNegative}
           onClose={() => setAdjustBatch(null)}
           onSaved={() => {
+            const id = adjustBatch.batch.id
             setAdjustBatch(null)
-            fetchInitialData?.()
+            refreshBatch(id)
           }}
         />
       )}
+      {blockBatch && (
+        <InventoryBlockBatchModal
+          batch={blockBatch.batch}
+          medicine={blockBatch.medicine}
+          productName={productNameForBatch(blockBatch.batch, medicineById)}
+          medicineCategoryRows={medicineCategoryRows}
+          onClose={() => setBlockBatch(null)}
+          onSaved={() => {
+            const id = blockBatch.batch.id
+            setBlockBatch(null)
+            refreshBatch(id)
+          }}
+        />
+      )}
+    </div>
+  )
+}
+
+const BLOCK_REASON_PRESETS = ['Recall', 'Damaged', 'Quarantine', 'Supplier return', 'Quality check']
+
+function InventoryBlockBatchModal({ batch, medicine, productName, medicineCategoryRows = [], onClose, onSaved }) {
+  const blocking = !batch.is_sale_blocked
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const { baseLabel, packLabel, perPack } = inventoryQtyLabels(medicine, medicineCategoryRows)
+  const qty = Number(batch.quantity ?? 0)
+  const stockLabel = formatPackAndBaseStock(qty, perPack, packLabel, baseLabel)
+
+  useEffect(() => {
+    function onKey(e) {
+      if (e.key === 'Escape' && !saving) onClose()
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [onClose, saving])
+
+  async function save() {
+    setSaving(true)
+    try {
+      await api.patch(`/batches/${batch.id}/`, {
+        is_sale_blocked: blocking,
+        sale_block_reason: blocking ? reason.trim().slice(0, 120) : '',
+      })
+      toast.success(blocking ? `Batch ${batch.batch_no} blocked for sale` : `Batch ${batch.batch_no} is sellable again`)
+      onSaved?.()
+    } catch (e) {
+      toast.error(parseApiError(e) || 'Could not update batch')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-slate-900/40 z-[200] flex items-center justify-center p-4"
+      onClick={() => !saving && onClose()}
+      role="presentation"
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl w-full max-w-sm border border-slate-200 p-3"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label={blocking ? 'Block batch for sale' : 'Unblock batch'}
+      >
+        <div className="flex justify-between items-center mb-2">
+          <h3 className={`text-xs font-bold flex items-center gap-1.5 ${blocking ? 'text-rose-700' : 'text-emerald-700'}`}>
+            {blocking ? <BanIcon size={14} /> : <UnblockIcon size={14} />}
+            {blocking ? 'Block batch for sale' : 'Unblock batch'}
+          </h3>
+          <button type="button" onClick={onClose} disabled={saving} className="text-slate-400 hover:text-slate-700">
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-2 text-[10px]">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="col-span-2 min-w-0">
+              <span className="text-slate-500">Medicine</span>
+              <div className="font-semibold text-slate-900 truncate" title={productName || medicine?.name}>
+                {productName || medicine?.name || '—'}
+              </div>
+            </div>
+            <div>
+              <span className="text-slate-500">Batch</span>
+              <div className="font-mono">{batch.batch_no}</div>
+            </div>
+            <div>
+              <span className="text-slate-500">Expiry</span>
+              <div className="font-mono">{safeFormat(batch.expiry_date, 'dd/MM/yyyy')}</div>
+            </div>
+            <div className="col-span-2">
+              <span className="text-slate-500">Current stock</span>
+              <div className="font-semibold text-emerald-800">{stockLabel}</div>
+            </div>
+          </div>
+
+          {blocking ? (
+            <>
+              <div className="rounded border border-rose-100 bg-rose-50 px-2 py-1.5 text-rose-800 leading-snug">
+                This batch will stay in inventory with its stock, but it will <b>not be available for billing</b>. It
+                will appear greyed out under “out-of-stock / blocked batches” on the sales screen. Returns against old
+                bills are still allowed.
+              </div>
+              <div>
+                <span className="text-[9px] font-semibold text-slate-600">Reason (optional)</span>
+                <div className="mt-1 flex flex-wrap gap-1">
+                  {BLOCK_REASON_PRESETS.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => setReason(p)}
+                      className={`px-2 py-0.5 rounded-full border text-[10px] font-medium transition-colors ${
+                        reason === p
+                          ? 'bg-rose-600 border-rose-600 text-white'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
+                <textarea
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value.slice(0, 120))}
+                  rows={2}
+                  autoFocus
+                  className="mt-1.5 w-full border border-slate-200 rounded px-2 py-1 text-xs resize-none"
+                  placeholder="e.g. Manufacturer recall notice, broken strips…"
+                />
+                <div className="text-right text-[9px] text-slate-400">{reason.length}/120</div>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5">
+                <span className="text-slate-500">Blocked because</span>
+                <div className="font-semibold text-slate-800">{batch.sale_block_reason || 'No reason given'}</div>
+              </div>
+              <div className="rounded border border-emerald-100 bg-emerald-50 px-2 py-1.5 text-emerald-800 leading-snug">
+                After unblocking, this batch will be <b>available for billing again</b>
+                {qty > 0 ? ' and will appear in the sales search.' : ', but it has no stock so it will stay in the out-of-stock section.'}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div className="flex gap-2 mt-3">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="flex-1 py-1.5 rounded border border-slate-200 text-[10px] font-semibold disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            onClick={save}
+            className={`flex-1 py-1.5 rounded text-white text-[10px] font-semibold disabled:opacity-50 ${
+              blocking ? 'bg-rose-600 hover:bg-rose-700' : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
+          >
+            {saving ? 'Saving…' : blocking ? 'Block for sale' : 'Unblock batch'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
